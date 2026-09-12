@@ -4,11 +4,16 @@
 
 export type NodeId = string
 
+/** Style global du document : deux présets figés, jamais un mélange libre (voir generate.ts). */
+export type MindmapStyle = 'fancy' | 'simple'
+
 export interface MindmapNode {
   id: NodeId
   label: string
   /** Couleur explicite de la branche, ou null pour hériter de l'ancêtre le plus proche. */
   color: string | null
+  /** Couleur du texte (tikz `text=<couleur>`), ou null pour la couleur par défaut du style. */
+  textColor: string | null
   /** Angle de croissance en degrés depuis le parent (tikz `grow=<angle>:1`). Null pour la racine. */
   grow: number | null
   /** Distance au parent en cm (tikz `level distance`). Null pour la racine. */
@@ -20,6 +25,7 @@ export interface MindmapTree {
   root: MindmapNode
   /** Couleurs personnalisées déclarées via \definecolor, nom -> #rrggbb. */
   palette: Record<string, string>
+  style: MindmapStyle
 }
 
 // Palette finie de noms de couleurs xcolor de base (disponibles sans \definecolor), pour que le
@@ -56,10 +62,11 @@ export function makeNodeId(prefix = 'n'): NodeId {
   return `${prefix}-${idCounter}-${Date.now().toString(36)}`
 }
 
-export function createTree(rootLabel: string): MindmapTree {
+export function createTree(rootLabel: string, style: MindmapStyle = 'fancy'): MindmapTree {
   return {
-    root: { id: ROOT_ID, label: rootLabel, color: null, grow: null, distance: null, children: [] },
+    root: { id: ROOT_ID, label: rootLabel, color: null, textColor: null, grow: null, distance: null, children: [] },
     palette: {},
+    style,
   }
 }
 
@@ -100,13 +107,14 @@ function replaceNode(tree: MindmapTree, id: NodeId, updater: (node: MindmapNode)
 export function addChild(
   tree: MindmapTree,
   parentId: NodeId,
-  options: { label: string; grow: number; distance?: number; color?: string | null; id?: NodeId },
+  options: { label: string; grow: number; distance?: number; color?: string | null; textColor?: string | null; id?: NodeId },
 ): MindmapTree {
   const parentDepth = getDepth(tree, parentId)
   const child: MindmapNode = {
     id: options.id ?? makeNodeId(),
     label: options.label,
     color: options.color ?? null,
+    textColor: options.textColor ?? null,
     grow: options.grow,
     distance: options.distance ?? defaultDistanceForDepth(parentDepth + 1),
     children: [],
@@ -134,6 +142,24 @@ export function recolorNode(tree: MindmapTree, id: NodeId, color: string | null)
 export function moveNode(tree: MindmapTree, id: NodeId, placement: { grow: number; distance: number }): MindmapTree {
   if (id === ROOT_ID) throw new Error('La racine ne peut pas être déplacée')
   return replaceNode(tree, id, (node) => ({ ...node, grow: placement.grow, distance: placement.distance }))
+}
+
+/** Couleur du texte : contrairement à `color`, ne s'hérite pas — s'applique nœud par nœud. */
+export function setTextColor(tree: MindmapTree, id: NodeId, textColor: string | null): MindmapTree {
+  return replaceNode(tree, id, (node) => ({ ...node, textColor }))
+}
+
+export function setStyle(tree: MindmapTree, style: MindmapStyle): MindmapTree {
+  return { ...tree, style }
+}
+
+/**
+ * Convertit un nom de couleur du modèle (nom xcolor connu ou clé de palette personnalisée) en une
+ * valeur CSS effectivement affichable. Nécessaire car une clé de palette (ex: "custom1") n'est pas
+ * elle-même une couleur CSS valide — c'est un nom qui référence `MindmapTree.palette`.
+ */
+export function toCssColor(tree: MindmapTree, name: string): string {
+  return tree.palette[name] ?? name
 }
 
 /** Couleur effective d'un nœud : sa couleur propre, sinon celle de l'ancêtre le plus proche qui en a une. */

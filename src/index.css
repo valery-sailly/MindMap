@@ -61,7 +61,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   padding: 10px 20px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border);
@@ -77,6 +78,7 @@ body {
 .toolbar-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -84,10 +86,12 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow-x: auto;
 }
 
 .mindmap-canvas {
   flex: 1;
+  min-width: 480px;
   background:
     radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--bg);
@@ -169,6 +173,21 @@ input[type='color'] {
 
 .angle-snap-control select {
   width: auto;
+}
+
+.style-switch {
+  display: flex;
+  gap: 4px;
+}
+
+.style-switch button {
+  font-size: 13px;
+}
+
+.style-switch button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .node-inspector {

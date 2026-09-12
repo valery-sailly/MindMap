@@ -3,12 +3,16 @@ import {
   ROOT_ID,
   addChild,
   createTree,
+  defineColor,
   getResolvedColor,
   listChildAngles,
   moveNode,
   recolorNode,
   relabelNode,
   removeNode,
+  setStyle,
+  setTextColor,
+  toCssColor,
 } from '../../src/model/tree'
 
 describe('model/tree', () => {
@@ -84,5 +88,43 @@ describe('model/tree', () => {
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
     tree = addChild(tree, ROOT_ID, { label: 'B', grow: 210, id: 'b' })
     expect(listChildAngles(tree, ROOT_ID).sort((a, b) => a - b)).toEqual([90, 210])
+  })
+
+  it('defaults to no text color override, and to the fancy style', () => {
+    const tree = createTree('Root')
+    expect(tree.root.textColor).toBeNull()
+    expect(tree.style).toBe('fancy')
+  })
+
+  it('sets a per-node text color without affecting other nodes (no inheritance)', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'teal' })
+    tree = addChild(tree, 'a', { label: 'A1', grow: 90, id: 'a1' })
+    tree = setTextColor(tree, 'a', 'black')
+    expect(tree.root.children[0].textColor).toBe('black')
+    expect(tree.root.children[0].children[0].textColor).toBeNull()
+  })
+
+  it('allows setting the root text color', () => {
+    let tree = createTree('Root')
+    tree = setTextColor(tree, ROOT_ID, 'yellow')
+    expect(tree.root.textColor).toBe('yellow')
+  })
+
+  it('switches the global style', () => {
+    let tree = createTree('Root')
+    tree = setStyle(tree, 'simple')
+    expect(tree.style).toBe('simple')
+  })
+
+  it('resolves a known color name as-is (valid CSS keyword)', () => {
+    const tree = createTree('Root')
+    expect(toCssColor(tree, 'teal')).toBe('teal')
+  })
+
+  it('resolves a custom palette color name to its hex value', () => {
+    let tree = createTree('Root')
+    tree = defineColor(tree, 'custom1', '#1a2b3c')
+    expect(toCssColor(tree, 'custom1')).toBe('#1a2b3c')
   })
 })

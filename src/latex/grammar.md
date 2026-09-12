@@ -33,6 +33,23 @@ Si les marqueurs sont absents (fichier `.tex` écrit à la main), le parseur che
 premier `\begin{tikzpicture}[...]` dont les options contiennent `mindmap`. S'il en existe plusieurs,
 c'est une erreur : l'utilisateur doit choisir dans l'UI, jamais de devinette automatique.
 
+### Style global (`MindmapTree.style`)
+
+Les options de `\begin{tikzpicture}[...]` n'ont que **deux formes canoniques possibles**, définies
+dans `generate.ts::TIKZ_HEADER_OPTIONS` :
+
+- `fancy` (défaut) : nœuds circulaires colorés, texte blanc par défaut — le style mindmap
+  classique.
+- `simple` : rectangles à coins légèrement arrondis, fond blanc, contour de la couleur de branche,
+  texte noir par défaut — pensé pour un document formel/académique.
+
+Le reste du bloc (`child[...]`, `node[...]`, couleurs, grow, distance) est **strictement
+identique** entre les deux styles ; seule cette ligne d'options change. À l'analyse, `parse.ts`
+compare le contenu des crochets à ces deux chaînes exactes (espaces normalisés) pour restaurer
+`tree.style` ; toute autre chaîne d'options (fichier écrit à la main avec un style personnalisé)
+n'est pas préservée et retombe sur `fancy` par défaut — cohérent avec le principe déjà admis que
+les options de `tikzpicture` ne sont pas garanties byte-identiques à la réécriture.
+
 Tout ce qui précède le bloc (prefix) et tout ce qui le suit (suffix) est conservé tel quel, au
 byte près, lors d'une réécriture (mode B).
 
@@ -52,9 +69,14 @@ sont reconnues et ajoutées à la palette (`MindmapTree.palette`). `<nom>` : ide
 
 ```
 \node[concept, root concept] (root) {<label>}
+\node[concept, root concept, text=<couleur>] (root) {<label>}
 ```
 
-suivi directement des blocs `child{...}` (voir ci-dessous), terminé par `;`.
+`text=<couleur>` est optionnel, toujours en dernière position, même univers de couleurs que
+`concept color` (voir plus bas). Absent = couleur de texte par défaut du style (`fancy` : blanc,
+`simple` : noir — définie dans `every node/.style`, pas répétée sur chaque nœud).
+
+Suivi directement des blocs `child{...}` (voir ci-dessous), terminé par `;`.
 
 ## Nœuds enfants (récursif)
 
@@ -64,7 +86,14 @@ child[concept color=<couleur>, grow=<angle>:1, level distance=<distance>cm]{
   child{ ... }
   child{ ... }
 }
+child[concept color=<couleur>, grow=<angle>:1]{
+  node[concept, text=<couleur>] {<label>}
+}
 ```
+
+`node[concept]` peut être suivi d'une seule option `text=<couleur>` (jamais d'autre option) : la
+couleur du texte de **ce nœud précis**. Contrairement à `concept color`, `text=` **ne s'hérite
+pas** — chaque descendant garde le texte par défaut du style sauf s'il porte lui-même l'option.
 
 Règles strictes :
 - `grow=<angle>:1` est **obligatoire** et **explicite** sur chaque enfant. `grow cyclic` n'est
@@ -76,7 +105,8 @@ Règles strictes :
 - `concept color=<couleur>` : optionnel. Absent = le nœud hérite de la couleur résolue de son
   parent (voir `model/tree.ts::getResolvedColor`). `<couleur>` est soit un nom de la palette fixe
   (voir `model/tree.ts::DEFAULT_BRANCH_COLORS`, référencés par nom `mmColorN`), soit un nom déclaré
-  via `\definecolor` dans le préambule.
+  via `\definecolor` dans le préambule. `text=<couleur>` (sur `node[...]`, voir plus bas) partage
+  exactement le même univers de couleurs autorisées.
 - Les options entre crochets peuvent apparaître dans n'importe quel ordre séparées par des virgules
   ; `generate.ts` les émet toujours dans l'ordre `concept color, grow, level distance` pour un
   diff stable.

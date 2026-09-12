@@ -5,8 +5,10 @@ export interface BranchViewProps {
   parent: Point
   child: Point
   color: string
+  bendFactor: number
+  strokeWidth: number
 }
 
-export function BranchView({ parent, child, color }: BranchViewProps) {
-  return <path d={branchPath(parent, child)} fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" />
+export function BranchView({ parent, child, color, bendFactor, strokeWidth }: BranchViewProps) {
+  return <path d={branchPath(parent, child, bendFactor)} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
 }

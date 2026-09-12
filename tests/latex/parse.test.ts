@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addChild, createTree, defineColor, ROOT_ID } from '../../src/model/tree'
+import { addChild, createTree, defineColor, ROOT_ID, setStyle, setTextColor } from '../../src/model/tree'
 import { generateTikz } from '../../src/latex/generate'
 import { AmbiguousBlockError, BlockNotFoundError, parseDocument } from '../../src/latex/parse'
 import { ParseError } from '../../src/latex/tokenizer'
@@ -32,6 +32,47 @@ describe('latex/parse', () => {
 
     // Round-trip complet : regénérer l'arbre reparsé doit produire un texte identique.
     expect(generateTikz(parsed.tree)).toBe(tex)
+  })
+
+  it('round-trips a per-node text color (non-inherited)', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'orange' })
+    tree = setTextColor(tree, 'a', 'black')
+    tree = addChild(tree, 'a', { label: 'A1', grow: 90, id: 'a1' })
+    const tex = generateTikz(tree)
+    const parsed = parseDocument(tex)
+    expect(parsed.tree.root.children[0].textColor).toBe('black')
+    expect(parsed.tree.root.children[0].children[0].textColor).toBeNull()
+    expect(generateTikz(parsed.tree)).toBe(tex)
+  })
+
+  it('round-trips a root text color', () => {
+    let tree = createTree('Root')
+    tree = setTextColor(tree, ROOT_ID, 'yellow')
+    const tex = generateTikz(tree)
+    const parsed = parseDocument(tex)
+    expect(parsed.tree.root.textColor).toBe('yellow')
+    expect(generateTikz(parsed.tree)).toBe(tex)
+  })
+
+  it('round-trips the simple style', () => {
+    let tree = createTree('Root')
+    tree = setStyle(tree, 'simple')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'teal' })
+    const tex = generateTikz(tree)
+    const parsed = parseDocument(tex)
+    expect(parsed.tree.style).toBe('simple')
+    expect(generateTikz(parsed.tree)).toBe(tex)
+  })
+
+  it('defaults to the fancy style for a hand-written tikzpicture header it does not recognize', () => {
+    const source = [
+      '\\begin{tikzpicture}[mindmap, some custom option]',
+      '\\node[concept, root concept] (root) {Root};',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    const parsed = parseDocument(source)
+    expect(parsed.tree.style).toBe('fancy')
   })
 
   it('round-trips custom \\definecolor palette entries', () => {
@@ -111,6 +152,30 @@ describe('latex/parse', () => {
       '\\node[concept, root concept] (root) {Root}',
       '  child[concept color=notacolor, grow=0:1]{',
       '    node[concept] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    expect(() => parseDocument(source)).toThrow(ParseError)
+  })
+
+  it('rejects an unknown text color', () => {
+    const source = [
+      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
+      '\\node[concept, root concept] (root) {Root}',
+      '  child[grow=0:1]{',
+      '    node[concept, text=notacolor] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    expect(() => parseDocument(source)).toThrow(ParseError)
+  })
+
+  it('rejects an unsupported node option other than text=', () => {
+    const source = [
+      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
+      '\\node[concept, root concept] (root) {Root}',
+      '  child[grow=0:1]{',
+      '    node[concept, fill=red] {A}',
       '  };',
       '\\end{tikzpicture}',
     ].join('\n')

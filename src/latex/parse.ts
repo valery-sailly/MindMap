@@ -3,6 +3,7 @@
 
 import {
   KNOWN_COLOR_NAMES,
+  type MindmapStyle,
   type MindmapTree,
   ROOT_ID,
   addChild,
@@ -10,9 +11,22 @@ import {
   defaultDistanceForDepth,
   defineColor,
   findNode,
+  setTextColor,
 } from '../model/tree'
-import { BEGIN_MARKER, END_MARKER } from './generate'
+import { BEGIN_MARKER, END_MARKER, TIKZ_HEADER_OPTIONS } from './generate'
 import { ParseError, Scanner } from './tokenizer'
+
+function normalizeOptions(raw: string): string {
+  return raw.split(',').map((s) => s.trim()).join(', ')
+}
+
+function detectStyle(headerOpts: string): MindmapStyle {
+  const normalized = normalizeOptions(headerOpts)
+  const match = (Object.keys(TIKZ_HEADER_OPTIONS) as MindmapStyle[]).find(
+    (style) => normalizeOptions(TIKZ_HEADER_OPTIONS[style]) === normalized,
+  )
+  return match ?? 'fancy'
+}
 
 export class BlockNotFoundError extends Error {}
 
@@ -147,6 +161,27 @@ interface ChildOptions {
   distance: number | null
 }
 
+/**
+ * Valide qu'un contenu d'options `[...]` de nœud commence exactement par `requiredPrefix`
+ * (tokens séparés par des virgules, ex: `['concept']` ou `['concept', 'root concept']`), puis
+ * extrait une éventuelle option finale `text=<couleur>`. Toute autre option est une erreur.
+ */
+function parseNodeOptions(raw: string, scanner: Scanner, groupStart: number, requiredPrefix: string[]): string | null {
+  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
+  const expected = `[${requiredPrefix.join(', ')}${requiredPrefix.length ? ', ' : ''}text=<couleur>]` // pour le message d'erreur
+  for (let i = 0; i < requiredPrefix.length; i += 1) {
+    if (parts[i] !== requiredPrefix[i]) {
+      scanner.error(`Options de nœud non supportées : "[${raw.trim()}]" (attendu "[${requiredPrefix.join(', ')}]" avec ${expected} optionnel)`, groupStart)
+    }
+  }
+  const rest = parts.slice(requiredPrefix.length)
+  if (rest.length === 0) return null
+  if (rest.length === 1 && rest[0].startsWith('text=')) {
+    return rest[0].slice('text='.length).trim()
+  }
+  scanner.error(`Option de nœud non supportée : "${rest.join(', ')}" (seul "text=<couleur>" est permis en plus)`, groupStart)
+}
+
 function parseChildOptions(raw: string, scanner: Scanner, groupStart: number): ChildOptions {
   if (/\bgrow cyclic\b/.test(raw)) {
     scanner.error('`grow cyclic` non supporté : angle explicite requis (voir grammar.md)', groupStart)
@@ -228,6 +263,7 @@ function assertKnownColor(scanner: Scanner, groupStart: number, color: string, p
 interface RawChild {
   label: string
   color: string | null
+  textColor: string | null
   grow: number
   distance: number
   children: RawChild[]
@@ -243,10 +279,9 @@ function parseChildBlock(scanner: Scanner, depth: number, palette: Record<string
   scanner.expect('{')
   scanner.expect('node')
   const nodeOptsStart = scanner.position
-  const nodeOpts = scanner.readBracketGroup().trim()
-  if (nodeOpts !== 'concept') {
-    scanner.error(`Options de nœud enfant non supportées : "[${nodeOpts}]" (attendu "[concept]")`, nodeOptsStart)
-  }
+  const nodeOptsRaw = scanner.readBracketGroup()
+  const textColor = parseNodeOptions(nodeOptsRaw, scanner, nodeOptsStart, ['concept'])
+  if (textColor) assertKnownColor(scanner, nodeOptsStart, textColor, palette)
   const labelStart = scanner.position
   const rawLabel = scanner.readBraceGroup()
   const label = unescapeLabel(rawLabel, scanner, labelStart)
@@ -260,26 +295,26 @@ function parseChildBlock(scanner: Scanner, depth: number, palette: Record<string
   return {
     label,
     color: options.color,
+    textColor,
     grow: options.grow,
     distance: options.distance ?? defaultDistanceForDepth(depth),
     children,
   }
 }
 
-function parseTikzSource(tikzSource: string, palette: Record<string, string>): { rootLabel: string; children: RawChild[] } {
+function parseTikzSource(
+  tikzSource: string,
+  palette: Record<string, string>,
+): { rootLabel: string; rootTextColor: string | null; style: MindmapStyle; children: RawChild[] } {
   const scanner = new Scanner(tikzSource)
   scanner.expect('\\begin{tikzpicture}')
-  scanner.readBracketGroup()
+  const headerOpts = scanner.readBracketGroup()
+  const style = detectStyle(headerOpts)
   scanner.expect('\\node')
   const rootOptsStart = scanner.position
-  const rootOpts = scanner.readBracketGroup().trim()
-  const normalizedRootOpts = rootOpts.split(',').map((s) => s.trim()).join(', ')
-  if (normalizedRootOpts !== 'concept, root concept') {
-    scanner.error(
-      `Options de racine non supportées : "[${rootOpts}]" (attendu "[concept, root concept]")`,
-      rootOptsStart,
-    )
-  }
+  const rootOptsRaw = scanner.readBracketGroup()
+  const rootTextColor = parseNodeOptions(rootOptsRaw, scanner, rootOptsStart, ['concept', 'root concept'])
+  if (rootTextColor) assertKnownColor(scanner, rootOptsStart, rootTextColor, palette)
   scanner.expect('(')
   scanner.readUntil(')')
   scanner.expect(')')
@@ -293,16 +328,17 @@ function parseTikzSource(tikzSource: string, palette: Record<string, string>): {
   }
   scanner.expect(';')
   scanner.expect('\\end{tikzpicture}')
-  return { rootLabel, children }
+  return { rootLabel, rootTextColor, style, children }
 }
 
 export function parseDocument(source: string): ParsedDocument {
   const { prefix, block, suffix, hadMarkers } = locateBlock(source)
   const { palette, tikzSource } = extractPalette(block)
-  const { rootLabel, children } = parseTikzSource(tikzSource, palette)
+  const { rootLabel, rootTextColor, style, children } = parseTikzSource(tikzSource, palette)
 
-  let tree = createTree(rootLabel)
+  let tree = createTree(rootLabel, style)
   for (const [name, hex] of Object.entries(palette)) tree = defineColor(tree, name, hex)
+  if (rootTextColor) tree = setTextColor(tree, ROOT_ID, rootTextColor)
 
   function attach(tree: MindmapTree, parentId: string, raw: RawChild): MindmapTree {
     let next = addChild(tree, parentId, {
@@ -310,6 +346,7 @@ export function parseDocument(source: string): ParsedDocument {
       grow: raw.grow,
       distance: raw.distance,
       color: raw.color,
+      textColor: raw.textColor,
     })
     const located = findNode(next, parentId)
     if (!located) throw new Error('parent introuvable après ajout')

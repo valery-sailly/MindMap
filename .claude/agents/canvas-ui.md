@@ -31,6 +31,16 @@ React, et l'apparence générale ("jolie interface").
   avancé, toujours validée par le modèle derrière).
 - `ImportExportPanel` doit toujours utiliser `generateTikz`/`parseDocument` de `src/latex/` — ne
   jamais réimplémenter une sérialisation tex ad hoc dans l'UI.
+- `NodeView`/`MindmapCanvas` ne doivent jamais utiliser directement un nom de couleur du modèle
+  comme valeur CSS : toujours passer par `toCssColor(tree, name)` (bug déjà rencontré avec les
+  couleurs personnalisées, qui sont des clés de palette, pas des couleurs CSS).
+- `MindmapTree.style` (`'fancy' | 'simple'`) pilote à la fois le rendu (forme des nœuds dans
+  `NodeView`, `bendFactor`/épaisseur des branches dans `MindmapCanvas`) et le header tex généré —
+  toute nouvelle propriété visuelle liée au style doit être dérivée de `tree.style`, pas d'un état
+  local séparé.
+- `.side-panel` (340px fixe) + `.mindmap-canvas { min-width: 480px }` + `.workspace { overflow-x:
+  auto }` : ne pas retirer ce `min-width` sans retester à une largeur de fenêtre étroite (~375px) —
+  sans lui, le canvas peut être écrasé à quelques pixels de large et devenir inutilisable.
 
 ## Rappel de contrainte produit
 **Aucune IA au runtime.** Toute interaction doit rester une transformation déterministe d'un geste

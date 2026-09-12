@@ -9,7 +9,10 @@ dépendance UI (pas de React, pas de DOM sauf `layout/geometry.ts` qui reste ind
 
 ## Fichiers possédés
 - `src/model/tree.ts` — types `MindmapTree`/`MindmapNode`, opérations immuables (addChild,
-  removeNode, relabelNode, recolorNode, moveNode, getResolvedColor, defineColor...).
+  removeNode, relabelNode, recolorNode, setTextColor, moveNode, setStyle, getResolvedColor,
+  defineColor, toCssColor...). Note : `color` (couleur de branche) s'hérite le long de l'arbre
+  (`getResolvedColor`), `textColor` ne s'hérite jamais (nœud par nœud), et `style` (`'fancy' |
+  'simple'`) est une propriété globale de `MindmapTree`, pas d'un nœud.
 - `src/model/history.ts` — undo/redo générique par pile.
 - `src/layout/geometry.ts` — conversion point ↔ (angle, distance) polaire.
 - `src/layout/snapping.ts` — grille de snapping angle/distance, anti-chevauchement, `measureStroke`.
@@ -26,7 +29,12 @@ dépendance UI (pas de React, pas de DOM sauf `layout/geometry.ts` qui reste ind
   arbitraire non traçable jusqu'à l'une de ces deux sources.
 - `layout/snapping.ts` est **le seul endroit** où un geste de tracé libre (position souris) devient
   un paramètre `grow`/`distance`. Ne jamais dupliquer cette logique ailleurs (ex: dans `canvas/`).
-- `layout/curve.ts` est la seule source de vérité pour la géométrie des branches à l'écran.
+- `layout/curve.ts` est la seule source de vérité pour la géométrie des branches à l'écran
+  (`bendFactor` paramétrable : `DEFAULT_BEND_FACTOR` en style fancy, `SIMPLE_BEND_FACTOR` en simple).
+- Un nom de couleur du modèle (`'teal'`, ou une clé de palette custom comme `'custom1'`) **n'est
+  pas directement une valeur CSS valide** — toujours passer par `toCssColor(tree, name)` avant de
+  l'utiliser comme `fill`/`stroke`/etc. dans le canvas (bug déjà rencontré : une clé de palette
+  utilisée telle quelle en `fill` SVG ne s'affiche pas).
 
 ## Rappel de contrainte produit
 Ce projet a une contrainte dure de l'utilisateur : **aucune IA au runtime du site**. Tout ce que tu

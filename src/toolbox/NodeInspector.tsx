@@ -42,10 +42,35 @@ export function NodeInspector() {
         + Ajouter un enfant
       </button>
 
+      <div className="field">
+        <span>Couleur du texte</span>
+        <ColorPalette
+          value={node.textColor}
+          customColors={store.tree.palette}
+          onChange={(color) => store.setTextColor(node.id, color)}
+          nullLabel="Couleur par défaut du style (blanc en fancy, noir en simple)"
+          nullSymbol="Aa"
+        />
+        <div className="custom-color-row">
+          <input type="color" value={customHex} onChange={(e) => setCustomHex(e.target.value)} />
+          <button
+            type="button"
+            onClick={() => {
+              customColorCounter += 1
+              const name = `custom${customColorCounter}`
+              store.defineColor(name, customHex)
+              store.setTextColor(node.id, name)
+            }}
+          >
+            + couleur personnalisée
+          </button>
+        </div>
+      </div>
+
       {!isRoot && (
         <>
           <div className="field">
-            <span>Couleur</span>
+            <span>Couleur de la branche</span>
             <ColorPalette value={node.color} customColors={store.tree.palette} onChange={(color) => store.recolor(node.id, color)} />
             <div className="custom-color-row">
               <input type="color" value={customHex} onChange={(e) => setCustomHex(e.target.value)} />

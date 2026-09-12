@@ -31,6 +31,12 @@ déterministe. Concrètement pour ce module :
   bloc mindmap reconnu — ne jamais toucher au texte hors bloc.
 - `escapeLabel`/`unescapeLabel` restent des inverses exacts (voir tests existants sur les
   retours à la ligne et les caractères spéciaux LaTeX).
+- `TIKZ_HEADER_OPTIONS` (dans `generate.ts`) a exactement deux entrées (`fancy`/`simple`) ; toute
+  option `\begin{tikzpicture}[...]` qui ne correspond à aucune des deux, à l'analyse, retombe sur
+  `fancy` par défaut — c'est voulu, ne pas essayer de "deviner" un style à partir d'options
+  arbitraires (voir grammar.md § Style global).
+- `text=<couleur>` sur un `node[...]` est **par nœud, non hérité** (contrairement à
+  `concept color`) — ne jamais le faire cascader dans `generate.ts`/`parse.ts`.
 
 Lance `npm run test` (dossier `tests/latex/`) après chaque changement, et `npm run test -- -t
 round-trip` pour cibler spécifiquement les tests de round-trip si besoin.

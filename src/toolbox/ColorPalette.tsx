@@ -4,18 +4,26 @@ export interface ColorPaletteProps {
   value: string | null
   customColors: Record<string, string>
   onChange: (color: string | null) => void
+  nullLabel?: string
+  nullSymbol?: string
 }
 
-export function ColorPalette({ value, customColors, onChange }: ColorPaletteProps) {
+export function ColorPalette({
+  value,
+  customColors,
+  onChange,
+  nullLabel = 'Hériter de la branche parente',
+  nullSymbol = '↖',
+}: ColorPaletteProps) {
   return (
-    <div className="color-palette" role="group" aria-label="Couleur de branche">
+    <div className="color-palette" role="group" aria-label="Couleur">
       <button
         type="button"
         className={`swatch swatch-inherit${value === null ? ' selected' : ''}`}
         onClick={() => onChange(null)}
-        title="Hériter de la branche parente"
+        title={nullLabel}
       >
-        ↖
+        {nullSymbol}
       </button>
       {DEFAULT_BRANCH_COLORS.map((color) => (
         <button

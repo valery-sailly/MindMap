@@ -4,6 +4,7 @@
 import {
   KNOWN_COLOR_NAMES,
   type MindmapNode,
+  type MindmapStyle,
   type MindmapTree,
   defaultDistanceForDepth,
 } from '../model/tree'
@@ -12,6 +13,18 @@ export const BEGIN_MARKER = '% MINDMAP:BEGIN'
 export const END_MARKER = '% MINDMAP:END'
 
 const INDENT = '  '
+
+/**
+ * Options de `\begin{tikzpicture}[...]` par préset de style — seule chose qui varie entre les
+ * deux styles. Le reste (child/node/grow/couleurs) est strictement identique, voir grammar.md.
+ * `parse.ts` doit reconnaître exactement ces deux chaînes pour restaurer `tree.style` à l'import.
+ */
+export const TIKZ_HEADER_OPTIONS: Record<MindmapStyle, string> = {
+  fancy: 'mindmap, every node/.style={concept, align=center}',
+  simple:
+    'mindmap, every node/.style={concept, rectangle, rounded corners=2pt, align=center, ' +
+    'inner sep=6pt, thin, draw=concept color, fill=white, text=black}, every child/.style={thin}',
+}
 
 /** Erreur levée quand l'arbre référence une couleur hors du sous-ensemble supporté (voir grammar.md). */
 export class GenerateError extends Error {}
@@ -73,10 +86,16 @@ function renderChild(tree: MindmapTree, node: MindmapNode, depth: number): strin
     options.push(`level distance=${node.distance.toFixed(1)}cm`)
   }
 
+  const nodeOpts = ['concept']
+  if (node.textColor !== null) {
+    assertKnownColor(tree, node.textColor)
+    nodeOpts.push(`text=${node.textColor}`)
+  }
+
   const indent = INDENT.repeat(depth)
   const lines = [
     `${indent}child[${options.join(', ')}]{`,
-    `${indent}${INDENT}node[concept] {${escapeLabel(node.label)}}`,
+    `${indent}${INDENT}node[${nodeOpts.join(', ')}] {${escapeLabel(node.label)}}`,
   ]
   for (const grandchild of node.children) {
     lines.push(...renderChild(tree, grandchild, depth + 1))
@@ -87,9 +106,14 @@ function renderChild(tree: MindmapTree, node: MindmapNode, depth: number): strin
 
 export function generateTikz(tree: MindmapTree): string {
   const preamble = renderPreambleColors(tree)
+  const rootOpts = ['concept', 'root concept']
+  if (tree.root.textColor !== null) {
+    assertKnownColor(tree, tree.root.textColor)
+    rootOpts.push(`text=${tree.root.textColor}`)
+  }
   const bodyLines = [
-    '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-    `\\node[concept, root concept] (root) {${escapeLabel(tree.root.label)}}`,
+    `\\begin{tikzpicture}[${TIKZ_HEADER_OPTIONS[tree.style]}]`,
+    `\\node[${rootOpts.join(', ')}] (root) {${escapeLabel(tree.root.label)}}`,
     ...tree.root.children.flatMap((child) => renderChild(tree, child, 1)),
   ]
   // Le point-virgule final ferme la dernière commande \node/child imbriquée.

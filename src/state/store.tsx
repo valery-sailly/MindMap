@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useReducer } from 'react'
 import type { ReactNode } from 'react'
 import {
+  type MindmapStyle,
   type MindmapTree,
   type NodeId,
   addChild as modelAddChild,
@@ -11,6 +12,8 @@ import {
   recolorNode as modelRecolorNode,
   relabelNode as modelRelabelNode,
   removeNode as modelRemoveNode,
+  setStyle as modelSetStyle,
+  setTextColor as modelSetTextColor,
 } from '../model/tree'
 import { type History, canRedo, canUndo, createHistory, push, redo, undo } from '../model/history'
 
@@ -20,12 +23,14 @@ interface State {
 }
 
 type Action =
-  | { type: 'ADD_CHILD'; id: NodeId; parentId: NodeId; label: string; grow: number; distance: number; color: string | null }
+  | { type: 'ADD_CHILD'; id: NodeId; parentId: NodeId; label: string; grow: number; distance: number; color: string | null; textColor: string | null }
   | { type: 'REMOVE_NODE'; id: NodeId }
   | { type: 'RELABEL'; id: NodeId; label: string }
   | { type: 'RECOLOR'; id: NodeId; color: string | null }
+  | { type: 'SET_TEXT_COLOR'; id: NodeId; color: string | null }
   | { type: 'MOVE'; id: NodeId; grow: number; distance: number }
   | { type: 'DEFINE_COLOR'; name: string; hex: string }
+  | { type: 'SET_STYLE'; style: MindmapStyle }
   | { type: 'REPLACE_TREE'; tree: MindmapTree }
   | { type: 'SELECT'; id: NodeId | null }
   | { type: 'UNDO' }
@@ -40,6 +45,7 @@ function reducer(state: State, action: Action): State {
         grow: action.grow,
         distance: action.distance,
         color: action.color,
+        textColor: action.textColor,
       })
       return { history: push(state.history, tree), selectedId: action.id }
     }
@@ -52,6 +58,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, history: push(state.history, modelRelabelNode(state.history.present, action.id, action.label)) }
     case 'RECOLOR':
       return { ...state, history: push(state.history, modelRecolorNode(state.history.present, action.id, action.color)) }
+    case 'SET_TEXT_COLOR':
+      return { ...state, history: push(state.history, modelSetTextColor(state.history.present, action.id, action.color)) }
     case 'MOVE':
       return {
         ...state,
@@ -59,6 +67,8 @@ function reducer(state: State, action: Action): State {
       }
     case 'DEFINE_COLOR':
       return { ...state, history: push(state.history, modelDefineColor(state.history.present, action.name, action.hex)) }
+    case 'SET_STYLE':
+      return { ...state, history: push(state.history, modelSetStyle(state.history.present, action.style)) }
     case 'REPLACE_TREE':
       return { history: createHistory(action.tree), selectedId: null }
     case 'SELECT':
@@ -77,12 +87,17 @@ export interface MindmapStore {
   selectedId: NodeId | null
   canUndo: boolean
   canRedo: boolean
-  addChild: (parentId: NodeId, options: { label: string; grow: number; distance: number; color?: string | null }) => NodeId
+  addChild: (
+    parentId: NodeId,
+    options: { label: string; grow: number; distance: number; color?: string | null; textColor?: string | null },
+  ) => NodeId
   removeNode: (id: NodeId) => void
   relabel: (id: NodeId, label: string) => void
   recolor: (id: NodeId, color: string | null) => void
+  setTextColor: (id: NodeId, color: string | null) => void
   move: (id: NodeId, placement: { grow: number; distance: number }) => void
   defineColor: (name: string, hex: string) => void
+  setStyle: (style: MindmapStyle) => void
   replaceTree: (tree: MindmapTree) => void
   select: (id: NodeId | null) => void
   undo: () => void
@@ -99,14 +114,25 @@ export function MindmapProvider({ children, initialTree }: { children: ReactNode
 
   const addChild = useCallback<MindmapStore['addChild']>((parentId, options) => {
     const id = makeNodeId()
-    dispatch({ type: 'ADD_CHILD', id, parentId, label: options.label, grow: options.grow, distance: options.distance, color: options.color ?? null })
+    dispatch({
+      type: 'ADD_CHILD',
+      id,
+      parentId,
+      label: options.label,
+      grow: options.grow,
+      distance: options.distance,
+      color: options.color ?? null,
+      textColor: options.textColor ?? null,
+    })
     return id
   }, [])
   const removeNode = useCallback((id: NodeId) => dispatch({ type: 'REMOVE_NODE', id }), [])
   const relabel = useCallback((id: NodeId, label: string) => dispatch({ type: 'RELABEL', id, label }), [])
   const recolor = useCallback((id: NodeId, color: string | null) => dispatch({ type: 'RECOLOR', id, color }), [])
+  const setTextColorAction = useCallback((id: NodeId, color: string | null) => dispatch({ type: 'SET_TEXT_COLOR', id, color }), [])
   const move = useCallback((id: NodeId, placement: { grow: number; distance: number }) => dispatch({ type: 'MOVE', id, ...placement }), [])
   const defineColorAction = useCallback((name: string, hex: string) => dispatch({ type: 'DEFINE_COLOR', name, hex }), [])
+  const setStyleAction = useCallback((style: MindmapStyle) => dispatch({ type: 'SET_STYLE', style }), [])
   const replaceTree = useCallback((tree: MindmapTree) => dispatch({ type: 'REPLACE_TREE', tree }), [])
   const select = useCallback((id: NodeId | null) => dispatch({ type: 'SELECT', id }), [])
   const undoAction = useCallback(() => dispatch({ type: 'UNDO' }), [])
@@ -122,14 +148,30 @@ export function MindmapProvider({ children, initialTree }: { children: ReactNode
       removeNode,
       relabel,
       recolor,
+      setTextColor: setTextColorAction,
       move,
       defineColor: defineColorAction,
+      setStyle: setStyleAction,
       replaceTree,
       select,
       undo: undoAction,
       redo: redoAction,
     }),
-    [state, addChild, removeNode, relabel, recolor, move, defineColorAction, replaceTree, select, undoAction, redoAction],
+    [
+      state,
+      addChild,
+      removeNode,
+      relabel,
+      recolor,
+      setTextColorAction,
+      move,
+      defineColorAction,
+      setStyleAction,
+      replaceTree,
+      select,
+      undoAction,
+      redoAction,
+    ],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

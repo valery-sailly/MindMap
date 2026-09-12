@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { addChild, createTree, defineColor, recolorNode, ROOT_ID } from '../../src/model/tree'
-import { BEGIN_MARKER, END_MARKER, GenerateError, escapeLabel, generateTikz } from '../../src/latex/generate'
+import { addChild, createTree, defineColor, recolorNode, ROOT_ID, setStyle, setTextColor } from '../../src/model/tree'
+import { BEGIN_MARKER, END_MARKER, GenerateError, TIKZ_HEADER_OPTIONS, escapeLabel, generateTikz } from '../../src/latex/generate'
 
 describe('latex/generate', () => {
   it('wraps output with the round-trip markers', () => {
@@ -78,5 +78,47 @@ describe('latex/generate', () => {
     tree = recolorNode(tree, 'a', 'blue')
     const tex = generateTikz(tree)
     expect(tex).toContain('concept color=blue')
+  })
+
+  it('adds a text= option on a child node with an explicit text color', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'orange' })
+    tree = setTextColor(tree, 'a', 'black')
+    const tex = generateTikz(tree)
+    expect(tex).toContain('node[concept, text=black] {A}')
+  })
+
+  it('adds a text= option on the root node', () => {
+    let tree = createTree('Root')
+    tree = setTextColor(tree, ROOT_ID, 'yellow')
+    const tex = generateTikz(tree)
+    expect(tex).toContain('\\node[concept, root concept, text=yellow] (root) {Root};')
+  })
+
+  it('omits text= when no override is set', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
+    const tex = generateTikz(tree)
+    expect(tex).not.toContain('text=')
+  })
+
+  it('rejects an unknown text color', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
+    tree = setTextColor(tree, 'a', 'not-a-real-color')
+    expect(() => generateTikz(tree)).toThrow(GenerateError)
+  })
+
+  it('uses the fancy tikzpicture header by default', () => {
+    const tree = createTree('Root')
+    const tex = generateTikz(tree)
+    expect(tex).toContain(`\\begin{tikzpicture}[${TIKZ_HEADER_OPTIONS.fancy}]`)
+  })
+
+  it('switches to the simple tikzpicture header', () => {
+    let tree = createTree('Root')
+    tree = setStyle(tree, 'simple')
+    const tex = generateTikz(tree)
+    expect(tex).toContain(`\\begin{tikzpicture}[${TIKZ_HEADER_OPTIONS.simple}]`)
   })
 })

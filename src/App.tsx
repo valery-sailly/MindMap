@@ -3,6 +3,7 @@ import { MindmapProvider, useMindmapStore } from './state/store'
 import { MindmapCanvas } from './canvas/MindmapCanvas'
 import { NodeInspector } from './toolbox/NodeInspector'
 import { AngleSnapControl } from './toolbox/AngleSnapControl'
+import { StyleSwitch } from './toolbox/StyleSwitch'
 import { ImportExportPanel, type DocShell, type EditMode } from './toolbox/ImportExportPanel'
 import { DEFAULT_ANGLE_STEP_DEG } from './layout/snapping'
 
@@ -18,6 +19,7 @@ function Toolbar({ angleStep, onAngleStepChange }: { angleStep: number; onAngleS
         <button type="button" onClick={store.redo} disabled={!store.canRedo}>
           ↷ Rétablir
         </button>
+        <StyleSwitch value={store.tree.style} onChange={store.setStyle} />
         <AngleSnapControl value={angleStep} onChange={onAngleStepChange} />
       </div>
     </header>
