@@ -68,12 +68,12 @@ dans `generate.ts::TIKZ_HEADER_OPTIONS` (vérifiées par compilation réelle) :
 ```
 fancy:
 mindmap, every node/.style={rectangle, rounded corners=3pt, align=center, inner sep=6pt, thin,
-  draw=black, fill=white, font=\sffamily},
+  draw=black, fill=white},
 every child/.style={edge from parent path={(\tikzparentnode) -- (\tikzchildnode)},
   edge from parent/.style={draw, thin, black}}
 
 simple:
-mindmap, every node/.style={align=center, font=\sffamily},
+mindmap, every node/.style={align=center},
 every child/.style={edge from parent path={(\tikzparentnode) -- (\tikzchildnode)},
   edge from parent/.style={draw, thin, black}}
 ```
@@ -83,6 +83,10 @@ blanc, bordure fine noire par défaut) autour de chaque nœud ; `simple` n'a ni 
 seul le texte est visible. Dans les deux cas, `edge from parent path` remplace le connecteur
 organique par défaut de `mindmap` par un simple segment droit entre les deux nœuds, et la couleur
 de ce segment est noire par défaut (redéfinissable par branche, voir plus bas).
+
+Aucune police n'est imposée (pas de `font=`) : le texte hérite délibérément de la police courante
+du document hôte (celle du préambule de l'utilisateur), pour rester visuellement cohérent avec le
+reste du document plutôt que d'imposer une police différente pour le diagramme.
 
 À l'analyse, `parse.ts` compare le contenu des crochets à ces deux chaînes exactes (espaces
 normalisés) pour restaurer `tree.style` ; toute autre chaîne d'options (fichier écrit à la main

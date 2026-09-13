@@ -29,15 +29,20 @@ const INDENT = '  '
  * `edge from parent path=...` remplace le connecteur organique par défaut de `mindmap` par un
  * simple segment droit — un enfant peut ensuite recolorer SON lien via
  * `edge from parent/.style={draw=<couleur>, thin}` dans ses propres options `child[...]`.
+ *
+ * Aucune police n'est imposée (pas de `font=`) : le texte des nœuds hérite volontairement de la
+ * police courante du document (celle définie par le préambule de l'utilisateur, ex. `palatino`,
+ * `lmodern`...), pour rester visuellement cohérent avec le reste du document qui accueille le
+ * diagramme plutôt que d'imposer une police différente.
  */
 export const TIKZ_HEADER_OPTIONS: Record<MindmapStyle, string> = {
   fancy:
     'mindmap, every node/.style={rectangle, rounded corners=3pt, align=center, inner sep=6pt, ' +
-    'thin, draw=black, fill=white, font=\\sffamily}, ' +
+    'thin, draw=black, fill=white}, ' +
     'every child/.style={edge from parent path={(\\tikzparentnode) -- (\\tikzchildnode)}, ' +
     'edge from parent/.style={draw, thin, black}}',
   simple:
-    'mindmap, every node/.style={align=center, font=\\sffamily}, ' +
+    'mindmap, every node/.style={align=center}, ' +
     'every child/.style={edge from parent path={(\\tikzparentnode) -- (\\tikzchildnode)}, ' +
     'edge from parent/.style={draw, thin, black}}',
 }
