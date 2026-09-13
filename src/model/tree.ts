@@ -23,29 +23,47 @@ export interface MindmapNode {
 
 export interface MindmapTree {
   root: MindmapNode
-  /** Couleurs personnalisées déclarées via \definecolor, nom -> #rrggbb. */
+  /** Couleurs personnalisées déclarées via \definecolor, nom -> #rrggbb (inclut la palette par défaut, voir DEFAULT_PALETTE_SEED). */
   palette: Record<string, string>
   style: MindmapStyle
 }
 
-// Palette finie de noms de couleurs xcolor de base (disponibles sans \definecolor), pour que le
-// générateur n'ait jamais besoin de sortir de ce que la toolbox propose. Les couleurs
-// personnalisées d'un .tex importé vivent séparément dans MindmapTree.palette (voir defineColor).
-export const DEFAULT_BRANCH_COLORS = [
-  'teal',
-  'blue',
-  'violet',
-  'orange',
-  'green',
-  'red',
-  'magenta',
-] as const
+// Palette sobre et cohérente, déclarée via \definecolor dans le .tex généré (pas des noms xcolor
+// bruts type "red"/"blue" jugés trop criards) — voir createTree qui la seed dans chaque nouvel
+// arbre. Purement optionnelle : par défaut (aucune couleur choisie), tout est monochrome noir —
+// voir DEFAULT_ROOT_COLOR_NAME et defaultTextColorForStyle. La couleur reste toujours disponible
+// pour les liens, les cases et le texte via la toolbox, elle n'est simplement pas le réglage par
+// défaut d'un nouveau nœud.
+export const DEFAULT_PALETTE_SEED: Record<string, string> = {
+  mmTeal: '#3d6b66',
+  mmBlue: '#3a5a80',
+  mmPlum: '#6b5170',
+  mmAmber: '#a97b3a',
+  mmMoss: '#556b45',
+  mmRose: '#95514f',
+  mmSlate: '#54606b',
+}
+
+/**
+ * Couleur neutre utilisée quand rien n'est choisi : un nom xcolor de base ('black'), pas une
+ * entrée de palette — nécessaire au niveau du tikzpicture (`concept color=black`) pour qu'un nœud
+ * sans couleur explicite (typiquement la racine) ait toujours une couleur définie, plutôt que de
+ * dépendre d'un comportement par défaut non garanti selon le moteur de rendu.
+ */
+export const DEFAULT_ROOT_COLOR_NAME = 'black'
+
+export const DEFAULT_BRANCH_COLORS = Object.keys(DEFAULT_PALETTE_SEED)
 
 export const KNOWN_COLOR_NAMES = new Set<string>([
   'white', 'black', 'red', 'green', 'blue', 'cyan', 'magenta', 'yellow',
   'gray', 'darkgray', 'lightgray', 'brown', 'lime', 'olive', 'orange',
   'pink', 'purple', 'teal', 'violet',
 ])
+
+/** Couleur de texte par défaut quand aucune n'est choisie : noir, dans les deux styles. */
+export function defaultTextColorForStyle(_style: MindmapStyle): string {
+  return 'black'
+}
 
 export function defaultDistanceForDepth(depth: number): number {
   if (depth <= 1) return 4
@@ -65,7 +83,7 @@ export function makeNodeId(prefix = 'n'): NodeId {
 export function createTree(rootLabel: string, style: MindmapStyle = 'fancy'): MindmapTree {
   return {
     root: { id: ROOT_ID, label: rootLabel, color: null, textColor: null, grow: null, distance: null, children: [] },
-    palette: {},
+    palette: { ...DEFAULT_PALETTE_SEED },
     style,
   }
 }
@@ -181,11 +199,17 @@ export function getResolvedColor(tree: MindmapTree, id: NodeId): string | null {
   return null
 }
 
-/** Angles déjà occupés par les enfants directs d'un parent, pour l'anti-chevauchement du snapping. */
-export function listChildAngles(tree: MindmapTree, parentId: NodeId): number[] {
+/**
+ * Angles déjà occupés par les enfants directs d'un parent, pour l'anti-chevauchement du snapping.
+ * `excludeId` permet d'ignorer un enfant précis (typiquement lui-même, quand on le déplace).
+ */
+export function listChildAngles(tree: MindmapTree, parentId: NodeId, excludeId?: NodeId): number[] {
   const located = findNode(tree, parentId)
   if (!located) throw new Error(`Nœud introuvable: ${parentId}`)
-  return located.node.children.map((c) => c.grow).filter((g): g is number => g !== null)
+  return located.node.children
+    .filter((c) => c.id !== excludeId)
+    .map((c) => c.grow)
+    .filter((g): g is number => g !== null)
 }
 
 /** Prochaine couleur par défaut à proposer pour une nouvelle branche de niveau 1. */

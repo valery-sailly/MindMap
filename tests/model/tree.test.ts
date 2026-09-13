@@ -90,6 +90,13 @@ describe('model/tree', () => {
     expect(listChildAngles(tree, ROOT_ID).sort((a, b) => a - b)).toEqual([90, 210])
   })
 
+  it('excludes a given node from the occupied angles (for moving it without self-blocking)', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
+    tree = addChild(tree, ROOT_ID, { label: 'B', grow: 210, id: 'b' })
+    expect(listChildAngles(tree, ROOT_ID, 'a')).toEqual([210])
+  })
+
   it('defaults to no text color override, and to the fancy style', () => {
     const tree = createTree('Root')
     expect(tree.root.textColor).toBeNull()

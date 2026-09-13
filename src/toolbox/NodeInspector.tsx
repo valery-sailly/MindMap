@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { ROOT_ID, defaultDistanceForDepth, findNode, listChildAngles, nextBranchColor } from '../model/tree'
 import { resolveFreeAngle } from '../layout/snapping'
 import { useMindmapStore } from '../state/store'
+import type { CanvasMode } from '../canvas/useDragToPlace'
 import { ColorPalette } from './ColorPalette'
 
 let customColorCounter = 0
 const DEFAULT_ANGLE_STEP = 15
 
-export function NodeInspector() {
+export function NodeInspector({ canvasMode }: { canvasMode: CanvasMode }) {
   const store = useMindmapStore()
   const [customHex, setCustomHex] = useState('#3366cc')
   const located = store.selectedId ? findNode(store.tree, store.selectedId) : undefined
@@ -15,7 +16,11 @@ export function NodeInspector() {
   if (!located) {
     return (
       <div className="node-inspector node-inspector-empty">
-        <p>Sélectionnez un nœud, ou faites glisser depuis un nœud existant pour créer une branche.</p>
+        <p>
+          {canvasMode === 'move'
+            ? 'Sélectionnez un nœud, ou faites glisser un nœud existant pour le repositionner.'
+            : 'Sélectionnez un nœud, ou faites glisser depuis un nœud existant pour créer une branche.'}
+        </p>
       </div>
     )
   }

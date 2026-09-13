@@ -39,9 +39,10 @@ describe('latex/generate', () => {
     const tex = generateTikz(tree)
     const a1Line = tex.split('\n').find((l) => l.includes('A1'))
     expect(a1Line).toContain('node[concept] {A1}')
-    const childBlockForA1 = tex.split('\n').find((l) => l.includes('grow=90:1') && l.includes('child['))
-    expect(tex.match(/concept color=/g)?.length).toBe(1)
-    expect(childBlockForA1).toBeDefined()
+    const childLines = tex.split('\n').filter((l) => l.trim().startsWith('child['))
+    const linesWithColor = childLines.filter((l) => l.includes('concept color='))
+    expect(linesWithColor).toHaveLength(1)
+    expect(linesWithColor[0]).toContain('concept color=teal')
   })
 
   it('emits \\definecolor lines for palette colors', () => {
@@ -95,11 +96,12 @@ describe('latex/generate', () => {
     expect(tex).toContain('\\node[concept, root concept, text=yellow] (root) {Root};')
   })
 
-  it('omits text= when no override is set', () => {
+  it('omits a per-node text= override when none is set (only the picture-wide default remains)', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
     const tex = generateTikz(tree)
-    expect(tex).not.toContain('text=')
+    const nodeLines = tex.split('\n').filter((l) => l.includes('node[concept'))
+    expect(nodeLines.every((l) => !l.includes('text='))).toBe(true)
   })
 
   it('rejects an unknown text color', () => {

@@ -1,9 +1,18 @@
 import { useMemo, useRef } from 'react'
-import { type MindmapNode, type MindmapTree, ROOT_ID, getResolvedColor, toCssColor } from '../model/tree'
+import {
+  DEFAULT_ROOT_COLOR_NAME,
+  type MindmapNode,
+  type MindmapTree,
+  ROOT_ID,
+  defaultTextColorForStyle,
+  getResolvedColor,
+  toCssColor,
+} from '../model/tree'
 import { type Point } from '../layout/geometry'
 import { computePositions } from '../layout/positions'
 import { DEFAULT_BEND_FACTOR, SIMPLE_BEND_FACTOR, branchPath } from '../layout/curve'
 import { useMindmapStore } from '../state/store'
+import type { CanvasMode } from './useDragToPlace'
 import { NodeView } from './NodeView'
 import { BranchView } from './BranchView'
 import { useDragToPlace } from './useDragToPlace'
@@ -11,52 +20,46 @@ import { useDragToPlace } from './useDragToPlace'
 const VIEW_WIDTH = 1400
 const VIEW_HEIGHT = 800
 const ORIGIN: Point = { x: VIEW_WIDTH / 2, y: VIEW_HEIGHT / 2 }
-const ROOT_COLOR = '#26282b'
-const ROOT_BORDER_COLOR = '#333333'
 
 interface FlatNode {
   node: MindmapNode
   position: Point
   parentPosition: Point | null
-  fillColor: string
-  strokeColor: string
+  accentColor: string
   textColor: string
 }
 
 function flatten(tree: MindmapTree, positions: Map<string, Point>): FlatNode[] {
-  const isSimple = tree.style === 'simple'
-  const defaultTextColor = isSimple ? 'black' : 'white'
+  const defaultTextColor = defaultTextColorForStyle(tree.style)
 
-  function colorsFor(node: MindmapNode): { fillColor: string; strokeColor: string } {
-    if (node.id === ROOT_ID) return { fillColor: ROOT_COLOR, strokeColor: ROOT_BORDER_COLOR }
-    const resolved = getResolvedColor(tree, node.id) ?? 'gray'
-    const css = toCssColor(tree, resolved)
-    return { fillColor: css, strokeColor: css }
+  function accentFor(node: MindmapNode): string {
+    const resolved = node.id === ROOT_ID ? DEFAULT_ROOT_COLOR_NAME : (getResolvedColor(tree, node.id) ?? DEFAULT_ROOT_COLOR_NAME)
+    return toCssColor(tree, resolved)
   }
 
   const out: FlatNode[] = []
   function walk(node: MindmapNode, parentPosition: Point | null) {
     const position = positions.get(node.id)
     if (!position) return
-    const { fillColor, strokeColor } = colorsFor(node)
+    const accentColor = accentFor(node)
     const textColor = node.textColor ? toCssColor(tree, node.textColor) : defaultTextColor
-    out.push({ node, position, parentPosition, fillColor, strokeColor, textColor })
+    out.push({ node, position, parentPosition, accentColor, textColor })
     for (const child of node.children) walk(child, position)
   }
   walk(tree.root, null)
   return out
 }
 
-export function MindmapCanvas({ angleStepDeg }: { angleStepDeg: number }) {
+export function MindmapCanvas({ angleStepDeg, mode }: { angleStepDeg: number; mode: CanvasMode }) {
   const store = useMindmapStore()
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const { dragFrom, dragPointer, startDrag } = useDragToPlace(svgRef, store.tree, store, angleStepDeg)
+
+  const positions = useMemo(() => computePositions(store.tree, ORIGIN), [store.tree])
+  const { dragFrom, dragPointer, startDrag } = useDragToPlace(svgRef, store.tree, positions, store, angleStepDeg, mode)
 
   const isSimple = store.tree.style === 'simple'
   const bendFactor = isSimple ? SIMPLE_BEND_FACTOR : DEFAULT_BEND_FACTOR
-  const branchWidth = isSimple ? 1.5 : 3
 
-  const positions = useMemo(() => computePositions(store.tree, ORIGIN), [store.tree])
   const flat = useMemo(() => flatten(store.tree, positions), [store.tree, positions])
 
   return (
@@ -69,15 +72,15 @@ export function MindmapCanvas({ angleStepDeg }: { angleStepDeg: number }) {
       }}
     >
       {flat.map(
-        ({ node, position, parentPosition, fillColor }) =>
+        ({ node, position, parentPosition, accentColor }) =>
           parentPosition && (
             <BranchView
               key={`branch-${node.id}`}
               parent={parentPosition}
               child={position}
-              color={fillColor}
+              color={accentColor}
               bendFactor={bendFactor}
-              strokeWidth={branchWidth}
+              strokeWidth={1.3}
             />
           ),
       )}
@@ -90,16 +93,17 @@ export function MindmapCanvas({ angleStepDeg }: { angleStepDeg: number }) {
           strokeWidth={2}
         />
       )}
-      {flat.map(({ node, position, fillColor, strokeColor, textColor }) => (
+      {flat.map(({ node, position, accentColor, textColor }) => (
         <NodeView
           key={node.id}
           id={node.id}
           label={node.label}
           position={position}
-          fillColor={fillColor}
-          strokeColor={strokeColor}
+          accentColor={accentColor}
           textColor={textColor}
           style={store.tree.style}
+          mode={mode}
+          isRoot={node.id === ROOT_ID}
           isSelected={store.selectedId === node.id}
           onPointerDown={startDrag}
         />

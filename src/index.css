@@ -175,16 +175,19 @@ input[type='color'] {
   width: auto;
 }
 
-.style-switch {
+.style-switch,
+.mode-switch {
   display: flex;
   gap: 4px;
 }
 
-.style-switch button {
+.style-switch button,
+.mode-switch button {
   font-size: 13px;
 }
 
-.style-switch button.active {
+.style-switch button.active,
+.mode-switch button.active {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;

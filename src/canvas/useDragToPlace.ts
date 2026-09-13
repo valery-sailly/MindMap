@@ -1,24 +1,36 @@
-// Traduit un geste souris (pointerdown sur un nœud -> drag -> pointerup) en un nouveau nœud
-// placé via layout/snapping.ts. Un simple clic (déplacement en dessous du seuil) sélectionne le
-// nœud au lieu d'en créer un, pour que la même interaction serve les deux usages.
+// Traduit un geste souris (pointerdown sur un nœud -> drag -> pointerup) en une action sur le
+// modèle, mesurée via layout/snapping.ts. Un simple clic (déplacement en dessous du seuil)
+// sélectionne le nœud plutôt que d'agir, pour que la même interaction serve les deux usages.
+//
+// Deux modes exclusifs (voir toolbox/ModeSwitch.tsx) :
+// - 'create' : glisser depuis un nœud crée un nouvel enfant à l'endroit relâché.
+// - 'move'   : glisser un nœud le repositionne (angle/distance relatifs à SON parent), sans rien créer.
 
 import { useCallback, useEffect, useState } from 'react'
 import type { RefObject } from 'react'
-import type { MindmapTree, NodeId } from '../model/tree'
-import { listChildAngles } from '../model/tree'
+import { type MindmapTree, type NodeId, ROOT_ID, findNode, listChildAngles } from '../model/tree'
 import type { Point } from '../layout/geometry'
 import { measureStroke } from '../layout/snapping'
 import type { MindmapStore } from '../state/store'
 
+export type CanvasMode = 'create' | 'move'
+
 const CLICK_THRESHOLD_PX = 20
+
+interface DragFrom {
+  nodeId: NodeId
+  origin: Point
+}
 
 export function useDragToPlace(
   svgRef: RefObject<SVGSVGElement | null>,
   tree: MindmapTree,
-  store: Pick<MindmapStore, 'addChild' | 'select'>,
+  positions: Map<NodeId, Point>,
+  store: Pick<MindmapStore, 'addChild' | 'select' | 'move'>,
   angleStepDeg: number,
+  mode: CanvasMode,
 ) {
-  const [dragFrom, setDragFrom] = useState<{ parentId: NodeId; origin: Point } | null>(null)
+  const [dragFrom, setDragFrom] = useState<DragFrom | null>(null)
   const [dragPointer, setDragPointer] = useState<Point | null>(null)
 
   const toLocalPoint = useCallback(
@@ -36,10 +48,20 @@ export function useDragToPlace(
   )
 
   const startDrag = useCallback(
-    (parentId: NodeId, clientX: number, clientY: number) => {
-      setDragFrom({ parentId, origin: toLocalPoint(clientX, clientY) })
+    (nodeId: NodeId) => {
+      if (mode === 'move') {
+        if (nodeId === ROOT_ID) return // la racine ne peut pas être déplacée : un clic simple la sélectionnera
+        const parent = findNode(tree, nodeId)?.parent
+        const origin = parent ? positions.get(parent.id) : undefined
+        if (!origin) return
+        setDragFrom({ nodeId, origin })
+      } else {
+        const origin = positions.get(nodeId)
+        if (!origin) return
+        setDragFrom({ nodeId, origin })
+      }
     },
-    [toLocalPoint],
+    [mode, tree, positions],
   )
 
   useEffect(() => {
@@ -57,12 +79,21 @@ export function useDragToPlace(
       const dx = pointer.x - from.origin.x
       const dy = pointer.y - from.origin.y
       if (Math.hypot(dx, dy) < CLICK_THRESHOLD_PX) {
-        store.select(from.parentId)
+        store.select(from.nodeId)
         return
       }
-      const occupied = listChildAngles(tree, from.parentId)
-      const { grow, distance } = measureStroke(from.origin, pointer, occupied, angleStepDeg)
-      store.addChild(from.parentId, { label: 'Nouveau nœud', grow, distance })
+      if (mode === 'move') {
+        const parent = findNode(tree, from.nodeId)?.parent
+        if (!parent) return
+        const occupied = listChildAngles(tree, parent.id, from.nodeId)
+        const { grow, distance } = measureStroke(from.origin, pointer, occupied, angleStepDeg)
+        store.move(from.nodeId, { grow, distance })
+        store.select(from.nodeId)
+      } else {
+        const occupied = listChildAngles(tree, from.nodeId)
+        const { grow, distance } = measureStroke(from.origin, pointer, occupied, angleStepDeg)
+        store.addChild(from.nodeId, { label: 'Nouveau nœud', grow, distance })
+      }
     }
 
     window.addEventListener('pointermove', handleMove)
@@ -71,7 +102,7 @@ export function useDragToPlace(
       window.removeEventListener('pointermove', handleMove)
       window.removeEventListener('pointerup', handleUp)
     }
-  }, [dragFrom, tree, store, angleStepDeg, toLocalPoint])
+  }, [dragFrom, tree, store, angleStepDeg, mode, toLocalPoint])
 
   return { dragFrom, dragPointer, startDrag }
 }

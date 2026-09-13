@@ -2,11 +2,13 @@
 // Déterministe : la même MindmapTree produit toujours exactement le même texte.
 
 import {
+  DEFAULT_ROOT_COLOR_NAME,
   KNOWN_COLOR_NAMES,
   type MindmapNode,
   type MindmapStyle,
   type MindmapTree,
   defaultDistanceForDepth,
+  defaultTextColorForStyle,
 } from '../model/tree'
 
 export const BEGIN_MARKER = '% MINDMAP:BEGIN'
@@ -18,12 +20,27 @@ const INDENT = '  '
  * Options de `\begin{tikzpicture}[...]` par préset de style — seule chose qui varie entre les
  * deux styles. Le reste (child/node/grow/couleurs) est strictement identique, voir grammar.md.
  * `parse.ts` doit reconnaître exactement ces deux chaînes pour restaurer `tree.style` à l'import.
+ *
+ * Épuré et monochrome par défaut dans les deux cas (`concept color=black, text=black`) — la
+ * couleur reste toujours disponible par nœud (`concept color=`/`text=` explicites), simplement
+ * pas activée tant que l'utilisateur ne la choisit pas. Seule différence entre les styles :
+ * `fancy` dessine une case (rectangle à coins arrondis, bordure fine) autour de chaque nœud,
+ * `simple` n'affiche que le texte, sans aucune case.
+ *
+ * `concept color=<défaut>` et `text=<défaut>` sont fixés ici au niveau du tikzpicture (pas
+ * seulement par nœud) : sans ça, un nœud sans couleur explicite — typiquement la racine — n'a
+ * aucune valeur définie pour "concept color", et certains moteurs de rendu retombent alors
+ * silencieusement sur du noir au lieu de lever une erreur claire. Toujours définir un défaut au
+ * niveau de l'image entière est le patron documenté par la bibliothèque mindmap elle-même.
  */
 export const TIKZ_HEADER_OPTIONS: Record<MindmapStyle, string> = {
-  fancy: 'mindmap, every node/.style={concept, align=center}',
+  fancy:
+    `mindmap, concept color=${DEFAULT_ROOT_COLOR_NAME}, text=${defaultTextColorForStyle('fancy')}, ` +
+    'every node/.style={concept, rectangle, rounded corners=3pt, align=center, inner sep=6pt, ' +
+    'thin, draw=concept color, fill=white, font=\\sffamily}',
   simple:
-    'mindmap, every node/.style={concept, rectangle, rounded corners=2pt, align=center, ' +
-    'inner sep=6pt, thin, draw=concept color, fill=white, text=black}, every child/.style={thin}',
+    `mindmap, concept color=${DEFAULT_ROOT_COLOR_NAME}, text=${defaultTextColorForStyle('simple')}, ` +
+    'every node/.style={concept, align=center, inner sep=2pt, draw=none, fill=none, font=\\sffamily}',
 }
 
 /** Erreur levée quand l'arbre référence une couleur hors du sous-ensemble supporté (voir grammar.md). */
