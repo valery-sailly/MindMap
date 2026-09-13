@@ -1,5 +1,10 @@
 // Arbre -> code TikZ mindmap, strictement conforme à ./grammar.md.
 // Déterministe : la même MindmapTree produit toujours exactement le même texte.
+//
+// v2 : n'utilise plus le style `concept` de tikz mindmap (voir grammar.md § Historique) —
+// vérifié par compilation réelle que `concept` ignore `draw=`/`fill=`/`text=` et ne peut pas être
+// personnalisé. `mindmap` ne sert plus qu'au positionnement (`grow=<angle>:1`), l'apparence est
+// entièrement pilotée par des clés PGF/TikZ standard, toutes vérifiées par compilation.
 
 import {
   DEFAULT_ROOT_COLOR_NAME,
@@ -8,7 +13,7 @@ import {
   type MindmapStyle,
   type MindmapTree,
   defaultDistanceForDepth,
-  defaultTextColorForStyle,
+  getResolvedColor,
 } from '../model/tree'
 
 export const BEGIN_MARKER = '% MINDMAP:BEGIN'
@@ -18,29 +23,23 @@ const INDENT = '  '
 
 /**
  * Options de `\begin{tikzpicture}[...]` par préset de style — seule chose qui varie entre les
- * deux styles. Le reste (child/node/grow/couleurs) est strictement identique, voir grammar.md.
- * `parse.ts` doit reconnaître exactement ces deux chaînes pour restaurer `tree.style` à l'import.
+ * deux styles, vérifiées par compilation réelle (pdflatex). `parse.ts` doit reconnaître
+ * exactement ces deux chaînes pour restaurer `tree.style` à l'import.
  *
- * Épuré et monochrome par défaut dans les deux cas (`concept color=black, text=black`) — la
- * couleur reste toujours disponible par nœud (`concept color=`/`text=` explicites), simplement
- * pas activée tant que l'utilisateur ne la choisit pas. Seule différence entre les styles :
- * `fancy` dessine une case (rectangle à coins arrondis, bordure fine) autour de chaque nœud,
- * `simple` n'affiche que le texte, sans aucune case.
- *
- * `concept color=<défaut>` et `text=<défaut>` sont fixés ici au niveau du tikzpicture (pas
- * seulement par nœud) : sans ça, un nœud sans couleur explicite — typiquement la racine — n'a
- * aucune valeur définie pour "concept color", et certains moteurs de rendu retombent alors
- * silencieusement sur du noir au lieu de lever une erreur claire. Toujours définir un défaut au
- * niveau de l'image entière est le patron documenté par la bibliothèque mindmap elle-même.
+ * `edge from parent path=...` remplace le connecteur organique par défaut de `mindmap` par un
+ * simple segment droit — un enfant peut ensuite recolorer SON lien via
+ * `edge from parent/.style={draw=<couleur>, thin}` dans ses propres options `child[...]`.
  */
 export const TIKZ_HEADER_OPTIONS: Record<MindmapStyle, string> = {
   fancy:
-    `mindmap, concept color=${DEFAULT_ROOT_COLOR_NAME}, text=${defaultTextColorForStyle('fancy')}, ` +
-    'every node/.style={concept, rectangle, rounded corners=3pt, align=center, inner sep=6pt, ' +
-    'thin, draw=concept color, fill=white, font=\\sffamily}',
+    'mindmap, every node/.style={rectangle, rounded corners=3pt, align=center, inner sep=6pt, ' +
+    'thin, draw=black, fill=white, font=\\sffamily}, ' +
+    'every child/.style={edge from parent path={(\\tikzparentnode) -- (\\tikzchildnode)}, ' +
+    'edge from parent/.style={draw, thin, black}}',
   simple:
-    `mindmap, concept color=${DEFAULT_ROOT_COLOR_NAME}, text=${defaultTextColorForStyle('simple')}, ` +
-    'every node/.style={concept, align=center, inner sep=2pt, draw=none, fill=none, font=\\sffamily}',
+    'mindmap, every node/.style={align=center, font=\\sffamily}, ' +
+    'every child/.style={edge from parent path={(\\tikzparentnode) -- (\\tikzchildnode)}, ' +
+    'edge from parent/.style={draw, thin, black}}',
 }
 
 /** Erreur levée quand l'arbre référence une couleur hors du sous-ensemble supporté (voir grammar.md). */
@@ -93,26 +92,28 @@ function renderChild(tree: MindmapTree, node: MindmapNode, depth: number): strin
   if (node.grow === null || node.distance === null) {
     throw new GenerateError(`Le nœud "${node.label}" n'a pas de position (grow/distance manquants).`)
   }
-  const options: string[] = []
-  if (node.color !== null) {
-    assertKnownColor(tree, node.color)
-    options.push(`concept color=${node.color}`)
-  }
-  options.push(`grow=${formatNumber(node.grow)}:1`)
-  if (node.distance !== defaultDistanceForDepth(depth)) {
-    options.push(`level distance=${node.distance.toFixed(1)}cm`)
-  }
+  const resolvedColor = getResolvedColor(tree, node.id) ?? DEFAULT_ROOT_COLOR_NAME
+  if (resolvedColor !== DEFAULT_ROOT_COLOR_NAME) assertKnownColor(tree, resolvedColor)
+  const hasColor = resolvedColor !== DEFAULT_ROOT_COLOR_NAME
 
-  const nodeOpts = ['concept']
+  const childOpts: string[] = [`grow=${formatNumber(node.grow)}:1`]
+  if (node.distance !== defaultDistanceForDepth(depth)) {
+    childOpts.push(`level distance=${node.distance.toFixed(1)}cm`)
+  }
+  if (hasColor) childOpts.push(`edge from parent/.style={draw=${resolvedColor}, thin}`)
+
+  const nodeOpts: string[] = []
+  if (hasColor && tree.style === 'fancy') nodeOpts.push(`draw=${resolvedColor}`)
   if (node.textColor !== null) {
     assertKnownColor(tree, node.textColor)
     nodeOpts.push(`text=${node.textColor}`)
   }
+  const nodeOptsStr = nodeOpts.length > 0 ? `[${nodeOpts.join(', ')}]` : ''
 
   const indent = INDENT.repeat(depth)
   const lines = [
-    `${indent}child[${options.join(', ')}]{`,
-    `${indent}${INDENT}node[${nodeOpts.join(', ')}] {${escapeLabel(node.label)}}`,
+    `${indent}child[${childOpts.join(', ')}]{`,
+    `${indent}${INDENT}node${nodeOptsStr} {${escapeLabel(node.label)}}`,
   ]
   for (const grandchild of node.children) {
     lines.push(...renderChild(tree, grandchild, depth + 1))
@@ -123,23 +124,30 @@ function renderChild(tree: MindmapTree, node: MindmapNode, depth: number): strin
 
 export function generateTikz(tree: MindmapTree): string {
   const preamble = renderPreambleColors(tree)
-  const rootOpts = ['concept', 'root concept']
+  const rootOpts: string[] = []
   if (tree.root.textColor !== null) {
     assertKnownColor(tree, tree.root.textColor)
     rootOpts.push(`text=${tree.root.textColor}`)
   }
+  const rootOptsStr = rootOpts.length > 0 ? `[${rootOpts.join(', ')}]` : ''
+
   const bodyLines = [
     `\\begin{tikzpicture}[${TIKZ_HEADER_OPTIONS[tree.style]}]`,
-    `\\node[${rootOpts.join(', ')}] (root) {${escapeLabel(tree.root.label)}}`,
+    `\\node${rootOptsStr} (root) {${escapeLabel(tree.root.label)}}`,
     ...tree.root.children.flatMap((child) => renderChild(tree, child, 1)),
   ]
   // Le point-virgule final ferme la dernière commande \node/child imbriquée.
   bodyLines[bodyLines.length - 1] += ';'
   bodyLines.push('\\end{tikzpicture}')
 
-  // \resizebox fait tenir le diagramme sur une page paysage ou une slide beamer quelle que soit
-  // sa taille naturelle, sans avoir à calculer nous-mêmes sa bounding box (nécessite \usepackage{graphicx}).
-  const resized = ['\\resizebox{\\linewidth}{!}{%', ...bodyLines, '}%']
+  // adjustbox contraint à LA FOIS la largeur et la hauteur (contrairement à \resizebox{\linewidth}{!}
+  // qui ne contraint que la largeur et peut déborder sur une deuxième page pour un arbre asymétrique
+  // très étendu verticalement — vérifié par compilation réelle). Nécessite \usepackage{adjustbox}.
+  const boxed = [
+    '\\begin{adjustbox}{max width=\\linewidth, max totalheight=0.85\\textheight, center}',
+    ...bodyLines,
+    '\\end{adjustbox}',
+  ]
 
-  return [BEGIN_MARKER, ...preamble, ...resized, END_MARKER].join('\n')
+  return [BEGIN_MARKER, ...preamble, ...boxed, END_MARKER].join('\n')
 }

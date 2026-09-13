@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { addChild, createTree, defineColor, ROOT_ID, setStyle, setTextColor } from '../../src/model/tree'
-import { generateTikz } from '../../src/latex/generate'
+import { TIKZ_HEADER_OPTIONS, generateTikz } from '../../src/latex/generate'
 import { AmbiguousBlockError, BlockNotFoundError, parseDocument } from '../../src/latex/parse'
 import { ParseError } from '../../src/latex/tokenizer'
 
@@ -27,7 +27,10 @@ describe('latex/parse', () => {
     expect(parsed.tree.root.children).toHaveLength(2)
     const accueil = parsed.tree.root.children[0]
     expect(accueil).toMatchObject({ label: 'Accueil', grow: 90, distance: 5, color: 'teal' })
-    expect(accueil.children[0]).toMatchObject({ label: 'Gynécologie', grow: 70, color: null })
+    // La couleur est désormais toujours résolue explicitement (plus de cascade côté tikz) : un
+    // descendant qui héritait visuellement devient explicitement coloré à l'import, mais le rendu
+    // et le round-trip texte restent identiques (voir generate.ts et grammar.md § Historique).
+    expect(accueil.children[0]).toMatchObject({ label: 'Gynécologie', grow: 70, color: 'teal' })
     expect(parsed.tree.root.children[1]).toMatchObject({ label: 'Blog', grow: 210, color: 'violet' })
 
     // Round-trip complet : regénérer l'arbre reparsé doit produire un texte identique.
@@ -68,7 +71,7 @@ describe('latex/parse', () => {
   it('defaults to the fancy style for a hand-written tikzpicture header it does not recognize', () => {
     const source = [
       '\\begin{tikzpicture}[mindmap, some custom option]',
-      '\\node[concept, root concept] (root) {Root};',
+      '\\node (root) {Root};',
       '\\end{tikzpicture}',
     ].join('\n')
     const parsed = parseDocument(source)
@@ -99,10 +102,10 @@ describe('latex/parse', () => {
     const handWritten = [
       'Some intro text.',
       '',
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root}',
-      '  child[concept color=blue, grow=45:1]{',
-      '    node[concept] {A}',
+      '\\begin{tikzpicture}[mindmap, every node/.style={align=center}]',
+      '\\node (root) {Root}',
+      '  child[grow=45:1, edge from parent/.style={draw=blue, thin}]{',
+      '    node {A}',
       '  };',
       '\\end{tikzpicture}',
       '',
@@ -113,6 +116,43 @@ describe('latex/parse', () => {
     expect(parsed.tree.root.children[0]).toMatchObject({ label: 'A', color: 'blue' })
     expect(parsed.prefix).toContain('Some intro text.')
     expect(parsed.suffix).toContain('Some trailing text.')
+  })
+
+  it('parses a hand-written fancy .tex with a draw= matching the edge color', () => {
+    const handWritten = [
+      '\\begin{tikzpicture}[mindmap, every node/.style={rectangle, draw=black, fill=white}]',
+      '\\node (root) {Root}',
+      '  child[grow=45:1, edge from parent/.style={draw=blue, thin}]{',
+      '    node[draw=blue] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    const parsed = parseDocument(handWritten)
+    expect(parsed.tree.root.children[0]).toMatchObject({ label: 'A', color: 'blue' })
+  })
+
+  it('rejects a fancy node whose draw= disagrees with its edge color', () => {
+    const handWritten = [
+      '\\begin{tikzpicture}[mindmap, every node/.style={rectangle, draw=black, fill=white}]',
+      '\\node (root) {Root}',
+      '  child[grow=45:1, edge from parent/.style={draw=blue, thin}]{',
+      '    node[draw=red] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    expect(() => parseDocument(handWritten)).toThrow(ParseError)
+  })
+
+  it('rejects draw= on a node in simple style (no box to color)', () => {
+    const handWritten = [
+      `\\begin{tikzpicture}[${TIKZ_HEADER_OPTIONS.simple}]`,
+      '\\node (root) {Root}',
+      '  child[grow=45:1]{',
+      '    node[draw=blue] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    expect(() => parseDocument(handWritten)).toThrow(ParseError)
   })
 
   it('preserves prefix/suffix bytes exactly when markers are present', () => {
@@ -126,10 +166,10 @@ describe('latex/parse', () => {
 
   it('rejects grow cyclic with a clear error, no silent fallback', () => {
     const source = [
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root}',
-      '  child[concept color=blue, grow cyclic]{',
-      '    node[concept] {A}',
+      '\\begin{tikzpicture}[mindmap, every node/.style={align=center}]',
+      '\\node (root) {Root}',
+      '  child[grow cyclic]{',
+      '    node {A}',
       '  };',
       '\\end{tikzpicture}',
     ].join('\n')
@@ -137,21 +177,18 @@ describe('latex/parse', () => {
   })
 
   it('rejects an unsupported macro inside a label', () => {
-    const source = [
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root \\alpha}',
-      '  ;',
-      '\\end{tikzpicture}',
-    ].join('\n')
+    const source = ['\\begin{tikzpicture}[mindmap]', '\\node (root) {Root \\alpha}', '  ;', '\\end{tikzpicture}'].join(
+      '\n',
+    )
     expect(() => parseDocument(source)).toThrow(ParseError)
   })
 
   it('rejects an unknown color', () => {
     const source = [
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root}',
-      '  child[concept color=notacolor, grow=0:1]{',
-      '    node[concept] {A}',
+      '\\begin{tikzpicture}[mindmap]',
+      '\\node (root) {Root}',
+      '  child[grow=0:1, edge from parent/.style={draw=notacolor, thin}]{',
+      '    node {A}',
       '  };',
       '\\end{tikzpicture}',
     ].join('\n')
@@ -160,22 +197,34 @@ describe('latex/parse', () => {
 
   it('rejects an unknown text color', () => {
     const source = [
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root}',
+      '\\begin{tikzpicture}[mindmap]',
+      '\\node (root) {Root}',
       '  child[grow=0:1]{',
-      '    node[concept, text=notacolor] {A}',
+      '    node[text=notacolor] {A}',
       '  };',
       '\\end{tikzpicture}',
     ].join('\n')
     expect(() => parseDocument(source)).toThrow(ParseError)
   })
 
-  it('rejects an unsupported node option other than text=', () => {
+  it('rejects an unsupported node option other than draw=/text=', () => {
     const source = [
-      '\\begin{tikzpicture}[mindmap, every node/.style={concept, align=center}]',
-      '\\node[concept, root concept] (root) {Root}',
+      '\\begin{tikzpicture}[mindmap]',
+      '\\node (root) {Root}',
       '  child[grow=0:1]{',
-      '    node[concept, fill=red] {A}',
+      '    node[fill=red] {A}',
+      '  };',
+      '\\end{tikzpicture}',
+    ].join('\n')
+    expect(() => parseDocument(source)).toThrow(ParseError)
+  })
+
+  it('rejects an unrecognized edge from parent/.style value', () => {
+    const source = [
+      '\\begin{tikzpicture}[mindmap]',
+      '\\node (root) {Root}',
+      '  child[grow=0:1, edge from parent/.style={ultra thick}]{',
+      '    node {A}',
       '  };',
       '\\end{tikzpicture}',
     ].join('\n')
@@ -189,11 +238,7 @@ describe('latex/parse', () => {
   })
 
   it('throws AmbiguousBlockError when several mindmap blocks exist without markers', () => {
-    const one = [
-      '\\begin{tikzpicture}[mindmap]',
-      '\\node[concept, root concept] (root) {A};',
-      '\\end{tikzpicture}',
-    ].join('\n')
+    const one = ['\\begin{tikzpicture}[mindmap]', '\\node (root) {A};', '\\end{tikzpicture}'].join('\n')
     const source = `${one}\n\n${one}`
     expect(() => parseDocument(source)).toThrow(AmbiguousBlockError)
   })

@@ -1,5 +1,9 @@
 // Tex -> arbre, strictement conforme à ./grammar.md. Toute construction hors du sous-ensemble
 // documenté échoue avec une erreur explicite (jamais de best-effort silencieux).
+//
+// v2 : plus de "concept"/"concept color" (voir grammar.md § Historique) — la couleur d'un nœud se
+// lit sur `edge from parent/.style={draw=<couleur>, thin}` (présent dans les deux styles) et,
+// en style fancy uniquement, sur `draw=<couleur>` du node lui-même (doit alors concorder).
 
 import {
   KNOWN_COLOR_NAMES,
@@ -17,7 +21,7 @@ import { BEGIN_MARKER, END_MARKER, TIKZ_HEADER_OPTIONS } from './generate'
 import { ParseError, Scanner } from './tokenizer'
 
 function normalizeOptions(raw: string): string {
-  return raw.split(',').map((s) => s.trim()).join(', ')
+  return raw.replace(/\s+/g, ' ').trim()
 }
 
 function detectStyle(headerOpts: string): MindmapStyle {
@@ -26,6 +30,25 @@ function detectStyle(headerOpts: string): MindmapStyle {
     (style) => normalizeOptions(TIKZ_HEADER_OPTIONS[style]) === normalized,
   )
   return match ?? 'fancy'
+}
+
+/** Découpe une liste d'options `a, b={c, d}, e` sur les virgules de premier niveau uniquement. */
+function splitTopLevelOptions(raw: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let current = ''
+  for (const ch of raw) {
+    if (ch === '{') depth += 1
+    else if (ch === '}') depth -= 1
+    if (ch === ',' && depth === 0) {
+      parts.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  if (current.trim()) parts.push(current.trim())
+  return parts
 }
 
 export class BlockNotFoundError extends Error {}
@@ -92,16 +115,24 @@ function locateBlock(source: string): { prefix: string; block: string; suffix: s
   if (endTikzIdx === -1) throw new BlockNotFoundError('\\end{tikzpicture} introuvable.')
   const afterTikz = endTikzIdx + endTikzLiteral.length
 
-  // Inclut un éventuel enrobage \resizebox{...}{...}{ ... } déjà présent autour du tikzpicture.
+  // Inclut un éventuel enrobage (\begin{adjustbox}{...} ou \resizebox{...}{...}{) déjà présent
+  // autour du tikzpicture.
   let blockStart = tikzStart
   const beforeTikz = source.slice(0, tikzStart)
-  const resizeMatch = /\\resizebox\{[^}]*\}\{[^}]*\}\{%?\s*$/.exec(beforeTikz)
-  if (resizeMatch) blockStart = resizeMatch.index
+  const adjustboxMatch = /\\begin\{adjustbox\}\{[^}]*\}\s*$/.exec(beforeTikz)
+  const resizeMatch = adjustboxMatch ? null : /\\resizebox\{[^}]*\}\{[^}]*\}\{%?\s*$/.exec(beforeTikz)
+  if (adjustboxMatch) blockStart = adjustboxMatch.index
+  else if (resizeMatch) blockStart = resizeMatch.index
 
   let blockEnd = afterTikz
   const afterTikzText = source.slice(afterTikz)
-  const closingMatch = /^\s*\}%?/.exec(afterTikzText)
-  if (resizeMatch && closingMatch) blockEnd = afterTikz + closingMatch[0].length
+  if (adjustboxMatch) {
+    const closingMatch = /^\s*\\end\{adjustbox\}/.exec(afterTikzText)
+    if (closingMatch) blockEnd = afterTikz + closingMatch[0].length
+  } else if (resizeMatch) {
+    const closingMatch = /^\s*\}%?/.exec(afterTikzText)
+    if (closingMatch) blockEnd = afterTikz + closingMatch[0].length
+  }
 
   // Remonte au-delà des lignes \definecolor contiguës qui précèdent immédiatement le bloc.
   const linesBefore = source.slice(0, blockStart).split('\n')
@@ -145,8 +176,15 @@ function extractPalette(block: string): BlockContent {
   while (bodyLines.length > 0 && bodyLines[0].trim() === '') bodyLines = bodyLines.slice(1)
   while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') bodyLines = bodyLines.slice(0, -1)
 
-  // Retire un enrobage \resizebox{...}{...}{ ... } toujours émis par generate.ts (facultatif à l'analyse).
-  if (bodyLines[0] && /^\\resizebox\{[^}]*\}\{[^}]*\}\{%?$/.test(bodyLines[0].trim())) {
+  // Retire un enrobage toujours émis par generate.ts (facultatif à l'analyse) : \begin{adjustbox}
+  // (v2, contraint largeur ET hauteur) ou \resizebox (v1, largeur seule — encore accepté en lecture
+  // pour les documents déjà exportés avant ce changement).
+  const first = bodyLines[0]?.trim()
+  if (first && /^\\begin\{adjustbox\}\{.*\}$/.test(first)) {
+    bodyLines = bodyLines.slice(1)
+    const last = bodyLines[bodyLines.length - 1]?.trim()
+    if (last === '\\end{adjustbox}') bodyLines = bodyLines.slice(0, -1)
+  } else if (first && /^\\resizebox\{[^}]*\}\{[^}]*\}\{%?$/.test(first)) {
     bodyLines = bodyLines.slice(1)
     const last = bodyLines[bodyLines.length - 1]?.trim()
     if (last === '}%' || last === '}') bodyLines = bodyLines.slice(0, -1)
@@ -161,44 +199,47 @@ interface ChildOptions {
   distance: number | null
 }
 
-/**
- * Valide qu'un contenu d'options `[...]` de nœud commence exactement par `requiredPrefix`
- * (tokens séparés par des virgules, ex: `['concept']` ou `['concept', 'root concept']`), puis
- * extrait une éventuelle option finale `text=<couleur>`. Toute autre option est une erreur.
- */
-function parseNodeOptions(raw: string, scanner: Scanner, groupStart: number, requiredPrefix: string[]): string | null {
-  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
-  const expected = `[${requiredPrefix.join(', ')}${requiredPrefix.length ? ', ' : ''}text=<couleur>]` // pour le message d'erreur
-  for (let i = 0; i < requiredPrefix.length; i += 1) {
-    if (parts[i] !== requiredPrefix[i]) {
-      scanner.error(`Options de nœud non supportées : "[${raw.trim()}]" (attendu "[${requiredPrefix.join(', ')}]" avec ${expected} optionnel)`, groupStart)
-    }
+function assertKnownColor(scanner: Scanner, groupStart: number, color: string, palette: Record<string, string>): void {
+  if (KNOWN_COLOR_NAMES.has(color) || color in palette) return
+  scanner.error(
+    `Couleur "${color}" inconnue : ni palette xcolor de base, ni déclarée via \\definecolor.`,
+    groupStart,
+  )
+}
+
+/** Extrait le contenu `{...}` d'une option `<prefix>{...}` déjà isolée par splitTopLevelOptions. */
+function extractBraceValue(part: string, prefix: string, scanner: Scanner, groupStart: number): string {
+  const rest = part.slice(prefix.length).trim()
+  const match = /^\{(.*)\}$/.exec(rest)
+  if (!match) scanner.error(`Valeur invalide pour "${prefix}" : attendu "{...}"`, groupStart)
+  return match![1]
+}
+
+function parseEdgeStyleColor(value: string, scanner: Scanner, groupStart: number): string {
+  const parts = splitTopLevelOptions(value)
+  const drawPart = parts.find((p) => p.startsWith('draw='))
+  if (!drawPart) {
+    scanner.error('"edge from parent/.style" doit contenir "draw=<couleur>"', groupStart)
   }
-  const rest = parts.slice(requiredPrefix.length)
-  if (rest.length === 0) return null
-  if (rest.length === 1 && rest[0].startsWith('text=')) {
-    return rest[0].slice('text='.length).trim()
+  const rest = parts.filter((p) => p !== drawPart)
+  if (rest.length !== 1 || rest[0] !== 'thin') {
+    scanner.error('"edge from parent/.style" non supporté : attendu exactement "draw=<couleur>, thin"', groupStart)
   }
-  scanner.error(`Option de nœud non supportée : "${rest.join(', ')}" (seul "text=<couleur>" est permis en plus)`, groupStart)
+  return drawPart!.slice('draw='.length).trim()
 }
 
 function parseChildOptions(raw: string, scanner: Scanner, groupStart: number): ChildOptions {
   if (/\bgrow cyclic\b/.test(raw)) {
     scanner.error('`grow cyclic` non supporté : angle explicite requis (voir grammar.md)', groupStart)
   }
-  const parts = raw
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean)
+  const parts = splitTopLevelOptions(raw)
 
   let color: string | null = null
   let grow: number | null = null
   let distance: number | null = null
 
   for (const part of parts) {
-    if (part.startsWith('concept color=')) {
-      color = part.slice('concept color='.length).trim()
-    } else if (part.startsWith('grow=')) {
+    if (part.startsWith('grow=')) {
       const value = part.slice('grow='.length).trim()
       const growMatch = /^(-?\d+(?:\.\d+)?):1$/.exec(value)
       if (!growMatch) scanner.error(`Angle "grow" invalide : "${value}" (attendu "<angle>:1")`, groupStart)
@@ -208,6 +249,9 @@ function parseChildOptions(raw: string, scanner: Scanner, groupStart: number): C
       const distMatch = /^(\d+(?:\.\d+)?)cm$/.exec(value)
       if (!distMatch) scanner.error(`Distance invalide : "${value}" (attendu "<nombre>cm")`, groupStart)
       distance = Number.parseFloat(distMatch![1])
+    } else if (part.startsWith('edge from parent/.style=')) {
+      const braceContent = extractBraceValue(part, 'edge from parent/.style=', scanner, groupStart)
+      color = parseEdgeStyleColor(braceContent, scanner, groupStart)
     } else {
       scanner.error(`Option non supportée dans un child[...] : "${part}"`, groupStart)
     }
@@ -215,6 +259,30 @@ function parseChildOptions(raw: string, scanner: Scanner, groupStart: number): C
 
   if (grow === null) scanner.error('Option "grow=<angle>:1" manquante (obligatoire)', groupStart)
   return { color, grow, distance }
+}
+
+interface NodeOptions {
+  drawColor: string | null
+  textColor: string | null
+}
+
+function parseNodeOptions(raw: string, scanner: Scanner, groupStart: number): NodeOptions {
+  const parts = splitTopLevelOptions(raw)
+  let drawColor: string | null = null
+  let textColor: string | null = null
+  for (const part of parts) {
+    if (part.startsWith('draw=')) {
+      drawColor = part.slice('draw='.length).trim()
+    } else if (part.startsWith('text=')) {
+      textColor = part.slice('text='.length).trim()
+    } else {
+      scanner.error(
+        `Option de nœud non supportée : "${part}" (seules "draw=<couleur>" et "text=<couleur>" sont permises)`,
+        groupStart,
+      )
+    }
+  }
+  return { drawColor, textColor }
 }
 
 const LABEL_ESCAPES: Array<[RegExp, string]> = [
@@ -252,14 +320,6 @@ export function unescapeLabel(raw: string, scanner: Scanner, groupStart: number)
   return out
 }
 
-function assertKnownColor(scanner: Scanner, groupStart: number, color: string, palette: Record<string, string>): void {
-  if (KNOWN_COLOR_NAMES.has(color) || color in palette) return
-  scanner.error(
-    `Couleur "${color}" inconnue : ni palette xcolor de base, ni déclarée via \\definecolor.`,
-    groupStart,
-  )
-}
-
 interface RawChild {
   label: string
   color: string | null
@@ -269,7 +329,7 @@ interface RawChild {
   children: RawChild[]
 }
 
-function parseChildBlock(scanner: Scanner, depth: number, palette: Record<string, string>): RawChild {
+function parseChildBlock(scanner: Scanner, depth: number, palette: Record<string, string>, style: MindmapStyle): RawChild {
   scanner.expect('child')
   const optsStart = scanner.position
   const optsRaw = scanner.readBracketGroup()
@@ -278,24 +338,39 @@ function parseChildBlock(scanner: Scanner, depth: number, palette: Record<string
 
   scanner.expect('{')
   scanner.expect('node')
-  const nodeOptsStart = scanner.position
-  const nodeOptsRaw = scanner.readBracketGroup()
-  const textColor = parseNodeOptions(nodeOptsRaw, scanner, nodeOptsStart, ['concept'])
-  if (textColor) assertKnownColor(scanner, nodeOptsStart, textColor, palette)
+  let nodeOpts: NodeOptions = { drawColor: null, textColor: null }
+  if (scanner.peekLiteral('[')) {
+    const nodeOptsStart = scanner.position
+    const nodeOptsRaw = scanner.readBracketGroup()
+    nodeOpts = parseNodeOptions(nodeOptsRaw, scanner, nodeOptsStart)
+    if (nodeOpts.drawColor !== null) {
+      if (style !== 'fancy') {
+        scanner.error('"draw=" sur un nœud n\'a de sens qu\'en style fancy (pas de case en style simple)', nodeOptsStart)
+      }
+      assertKnownColor(scanner, nodeOptsStart, nodeOpts.drawColor, palette)
+      if (options.color !== null && options.color !== nodeOpts.drawColor) {
+        scanner.error(
+          `Couleur de case ("${nodeOpts.drawColor}") et de lien ("${options.color}") incohérentes pour ce nœud`,
+          nodeOptsStart,
+        )
+      }
+    }
+    if (nodeOpts.textColor) assertKnownColor(scanner, nodeOptsStart, nodeOpts.textColor, palette)
+  }
   const labelStart = scanner.position
   const rawLabel = scanner.readBraceGroup()
   const label = unescapeLabel(rawLabel, scanner, labelStart)
 
   const children: RawChild[] = []
   while (scanner.peekLiteral('child')) {
-    children.push(parseChildBlock(scanner, depth + 1, palette))
+    children.push(parseChildBlock(scanner, depth + 1, palette, style))
   }
   scanner.expect('}')
 
   return {
     label,
-    color: options.color,
-    textColor,
+    color: options.color ?? nodeOpts.drawColor,
+    textColor: nodeOpts.textColor,
     grow: options.grow,
     distance: options.distance ?? defaultDistanceForDepth(depth),
     children,
@@ -311,10 +386,17 @@ function parseTikzSource(
   const headerOpts = scanner.readBracketGroup()
   const style = detectStyle(headerOpts)
   scanner.expect('\\node')
-  const rootOptsStart = scanner.position
-  const rootOptsRaw = scanner.readBracketGroup()
-  const rootTextColor = parseNodeOptions(rootOptsRaw, scanner, rootOptsStart, ['concept', 'root concept'])
-  if (rootTextColor) assertKnownColor(scanner, rootOptsStart, rootTextColor, palette)
+  let rootTextColor: string | null = null
+  if (scanner.peekLiteral('[')) {
+    const rootOptsStart = scanner.position
+    const rootOptsRaw = scanner.readBracketGroup()
+    const rootOpts = parseNodeOptions(rootOptsRaw, scanner, rootOptsStart)
+    if (rootOpts.drawColor !== null) {
+      scanner.error('La racine ne supporte pas "draw=" (pas de bordure ni de lien sur la racine)', rootOptsStart)
+    }
+    rootTextColor = rootOpts.textColor
+    if (rootTextColor) assertKnownColor(scanner, rootOptsStart, rootTextColor, palette)
+  }
   scanner.expect('(')
   scanner.readUntil(')')
   scanner.expect(')')
@@ -324,7 +406,7 @@ function parseTikzSource(
 
   const children: RawChild[] = []
   while (scanner.peekLiteral('child')) {
-    children.push(parseChildBlock(scanner, 1, palette))
+    children.push(parseChildBlock(scanner, 1, palette, style))
   }
   scanner.expect(';')
   scanner.expect('\\end{tikzpicture}')

@@ -10,18 +10,18 @@ describe('latex/generate', () => {
     expect(tex.endsWith(END_MARKER)).toBe(true)
   })
 
-  it('renders a lone root as a single terminated node', () => {
+  it('renders a lone root with no options (no color chosen)', () => {
     const tree = createTree('Root')
     const tex = generateTikz(tree)
-    expect(tex).toContain('\\node[concept, root concept] (root) {Root};')
+    expect(tex).toContain('\\node (root) {Root};')
   })
 
-  it('renders a child with an explicit color and omits the default-distance option', () => {
+  it('renders a colored child with a matching edge and node draw color, omitting default distance', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'Branch A', grow: 90, id: 'a', color: 'teal' })
     const tex = generateTikz(tree)
-    expect(tex).toContain('child[concept color=teal, grow=90:1]{')
-    expect(tex).toContain('node[concept] {Branch A}')
+    expect(tex).toContain('child[grow=90:1, edge from parent/.style={draw=teal, thin}]{')
+    expect(tex).toContain('node[draw=teal] {Branch A}')
     expect(tex).not.toContain('level distance')
   })
 
@@ -32,26 +32,33 @@ describe('latex/generate', () => {
     expect(tex).toContain('level distance=5.0cm')
   })
 
-  it('omits concept color on a child that inherits from its ancestor', () => {
+  it('propagates a resolved color explicitly to an inheriting descendant (no tikz-side cascading)', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'teal' })
     tree = addChild(tree, 'a', { label: 'A1', grow: 90, id: 'a1' })
     const tex = generateTikz(tree)
     const a1Line = tex.split('\n').find((l) => l.includes('A1'))
-    expect(a1Line).toContain('node[concept] {A1}')
+    expect(a1Line).toContain('node[draw=teal] {A1}')
     const childLines = tex.split('\n').filter((l) => l.trim().startsWith('child['))
-    const linesWithColor = childLines.filter((l) => l.includes('concept color='))
-    expect(linesWithColor).toHaveLength(1)
-    expect(linesWithColor[0]).toContain('concept color=teal')
+    expect(childLines.every((l) => l.includes('draw=teal'))).toBe(true)
   })
 
-  it('emits \\definecolor lines for palette colors', () => {
+  it('omits color options entirely for a node with no color in its ancestry', () => {
+    let tree = createTree('Root')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
+    const tex = generateTikz(tree)
+    expect(tex).toContain('child[grow=90:1]{')
+    expect(tex).toContain('node {A}')
+  })
+
+  it('emits \\definecolor lines for palette colors and references them by name', () => {
     let tree = createTree('Root')
     tree = defineColor(tree, 'customBlue', '#1a2b3c')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 0, id: 'a', color: 'customBlue' })
     const tex = generateTikz(tree)
     expect(tex).toContain('\\definecolor{customBlue}{RGB}{26,43,60}')
-    expect(tex).toContain('concept color=customBlue')
+    expect(tex).toContain('draw=customBlue, thin}]{')
+    expect(tex).toContain('node[draw=customBlue] {A}')
   })
 
   it('rejects an unknown color not in the palette (no silent fallback)', () => {
@@ -73,35 +80,45 @@ describe('latex/generate', () => {
     expect(escapeLabel('ligne 1\nligne 2')).toBe('ligne 1\\\\ligne 2')
   })
 
-  it('recoloring only the child keeps grandchildren inherited', () => {
+  it('recoloring a child updates both its edge and its own draw color', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'teal' })
     tree = recolorNode(tree, 'a', 'blue')
     const tex = generateTikz(tree)
-    expect(tex).toContain('concept color=blue')
+    expect(tex).toContain('draw=blue, thin}]{')
+    expect(tex).toContain('node[draw=blue] {A}')
   })
 
-  it('adds a text= option on a child node with an explicit text color', () => {
+  it('draw= is never emitted in simple style, even for a colored branch (no box to color)', () => {
+    let tree = createTree('Root')
+    tree = setStyle(tree, 'simple')
+    tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'teal' })
+    const tex = generateTikz(tree)
+    expect(tex).toContain('edge from parent/.style={draw=teal, thin}')
+    expect(tex).not.toContain('node[draw=')
+    expect(tex).toContain('node {A}')
+  })
+
+  it('adds a text= option on a child node with an explicit text color, after draw=', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a', color: 'orange' })
     tree = setTextColor(tree, 'a', 'black')
     const tex = generateTikz(tree)
-    expect(tex).toContain('node[concept, text=black] {A}')
+    expect(tex).toContain('node[draw=orange, text=black] {A}')
   })
 
   it('adds a text= option on the root node', () => {
     let tree = createTree('Root')
     tree = setTextColor(tree, ROOT_ID, 'yellow')
     const tex = generateTikz(tree)
-    expect(tex).toContain('\\node[concept, root concept, text=yellow] (root) {Root};')
+    expect(tex).toContain('\\node[text=yellow] (root) {Root};')
   })
 
-  it('omits a per-node text= override when none is set (only the picture-wide default remains)', () => {
+  it('omits a per-node text= override when none is set', () => {
     let tree = createTree('Root')
     tree = addChild(tree, ROOT_ID, { label: 'A', grow: 90, id: 'a' })
     const tex = generateTikz(tree)
-    const nodeLines = tex.split('\n').filter((l) => l.includes('node[concept'))
-    expect(nodeLines.every((l) => !l.includes('text='))).toBe(true)
+    expect(tex).not.toContain('text=')
   })
 
   it('rejects an unknown text color', () => {

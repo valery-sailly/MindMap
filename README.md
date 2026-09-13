@@ -13,9 +13,16 @@ déterministe.
 - **Mode « importer un .tex »** : collez un document contenant déjà une mindmap `tikz`. Il est
   analysé par un parseur classique (pas d'IA), affiché graphiquement, éditable, puis réexporté en
   ne modifiant que le bloc reconnu — le reste du fichier est préservé au byte près.
-- Le `.tex` généré est toujours enrobé dans `\resizebox{\linewidth}{!}{...}` pour tenir sur une
-  page en orientation paysage ou une slide beamer, quel que soit le nombre de nœuds. Ça nécessite
-  `\usepackage{graphicx}` dans votre document (à ajouter vous-même, non géré par cet outil).
+- Le `.tex` généré est toujours enrobé dans un `adjustbox` (largeur **et** hauteur contraintes)
+  pour tenir sur une page en orientation paysage ou une slide beamer, quel que soit le nombre de
+  nœuds. Préambule minimal nécessaire dans votre document (à ajouter vous-même, non géré par cet
+  outil) :
+  ```latex
+  \usepackage{tikz}
+  \usetikzlibrary{mindmap}
+  \usepackage{graphicx}
+  \usepackage{adjustbox}
+  ```
 
 Le sous-ensemble de TikZ `mindmap` réellement supporté (et donc les limites du parseur) est
 documenté précisément dans [`src/latex/grammar.md`](src/latex/grammar.md). Ce fichier fait
